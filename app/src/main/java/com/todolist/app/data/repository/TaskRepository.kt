@@ -1,5 +1,6 @@
 package com.todolist.app.data.repository
 
+import android.util.Log
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
@@ -29,6 +30,43 @@ class TaskRepository(
         }
     }
 
+    fun getDoneTasks(uid: String): Flow<List<Task>> {
+        return tasksFlow(uid) { task ->
+            !task.archived && task.status == TaskStatus.DONE
+        }
+    }
+
+    suspend fun getOpenTasksForWidget(
+        uid: String,
+        selectedTags: Set<String>,
+        maxItems: Int = 5
+    ): List<Task> {
+        val normalizedSelectedTags = selectedTags
+            .map { normalizeTag(it) }
+            .filter { it.isNotEmpty() }
+            .toSet()
+
+        return tasksCollection(uid)
+            .whereEqualTo("archived", false)
+            .get()
+            .await()
+            .documents
+            .mapNotNull { it.toTaskOrNull() }
+            .filter { it.status != TaskStatus.DONE }
+            .filter { task ->
+                if (normalizedSelectedTags.isEmpty()) {
+                    true
+                } else {
+                    task.tags.any { it in normalizedSelectedTags }
+                }
+            }
+            .sortedWith(
+                compareByDescending<Task> { it.priority.rank }
+                    .thenComparator { a, b -> compareDueDate(a.dueDate, b.dueDate) }
+            )
+            .take(maxItems.coerceAtLeast(1))
+    }
+
     suspend fun addTask(
         uid: String,
         title: String,
@@ -40,7 +78,7 @@ class TaskRepository(
         if (cleanTitle.isEmpty()) return
 
         val cleanTags = tags
-            .map { it.trim() }
+            .map { normalizeTag(it) }
             .filter { it.isNotEmpty() }
             .distinct()
 
@@ -73,6 +111,8 @@ class TaskRepository(
             var nextArchived = current.archived
             var nextPriority = current.priority
             var nextDueDate = current.dueDate
+            var nextTitle = current.title
+            var nextTags = current.tags
 
             patch.status?.let {
                 nextStatus = it
@@ -99,6 +139,15 @@ class TaskRepository(
             if (patch.setDueDate) {
                 nextDueDate = patch.dueDate
             }
+            patch.title?.let {
+                nextTitle = it.trim()
+            }
+            patch.tags?.let {
+                nextTags = it
+                    .map { tag -> normalizeTag(tag) }
+                    .filter { tag -> tag.isNotEmpty() }
+                    .distinct()
+            }
 
             if (nextCompleted != current.completed) {
                 transaction.update(docRef, "completed", nextCompleted)
@@ -114,6 +163,12 @@ class TaskRepository(
             }
             if (patch.setDueDate && nextDueDate != current.dueDate) {
                 transaction.update(docRef, "dueDate", nextDueDate)
+            }
+            if (patch.title != null && nextTitle.isNotBlank() && nextTitle != current.title) {
+                transaction.update(docRef, "title", nextTitle)
+            }
+            if (patch.tags != null && nextTags != current.tags) {
+                transaction.update(docRef, "tags", nextTags)
             }
         }.await()
     }
@@ -156,9 +211,10 @@ class TaskRepository(
 
     private fun DocumentSnapshot.toTaskOrNull(): Task? {
         val title = getString("title") ?: return null
-        val rawTags = get("tags") as? List<*> ?: emptyList<Any>()
+        val rawTags = get("tags")
+        val parsedTags = parseTagsRaw(rawTags)
 
-        return Task(
+        val mappedTask = Task(
             id = id,
             title = title,
             completed = getBoolean("completed") ?: false,
@@ -166,9 +222,18 @@ class TaskRepository(
             archived = getBoolean("archived") ?: false,
             priority = TaskPriority.from(getString("priority")),
             dueDate = getTimestamp("dueDate"),
-            tags = rawTags.mapNotNull { it?.toString()?.trim() }.filter { it.isNotEmpty() },
+            tags = parsedTags,
             createdAt = getTimestamp("createdAt")
         )
+
+        val rawType = rawTags?.javaClass?.name ?: "null"
+        val itemTypes = (rawTags as? List<*>)?.map { it?.javaClass?.name ?: "null" } ?: emptyList()
+        Log.d(
+            "TodoListTags",
+            "map task id=${mappedTask.id} title=${mappedTask.title} tags=${mappedTask.tags} rawTagsType=$rawType rawItemTypes=$itemTypes"
+        )
+
+        return mappedTask
     }
 
     private fun DocumentSnapshot.toTaskOrDefault(): Task {
@@ -183,5 +248,25 @@ class TaskRepository(
         val seconds = a.seconds.compareTo(b.seconds)
         if (seconds != 0) return seconds
         return a.nanoseconds.compareTo(b.nanoseconds)
+    }
+
+    private fun parseTagsRaw(raw: Any?): List<String> {
+        return when (raw) {
+            is List<*> -> raw
+                .filterIsInstance<String>()
+                .map { normalizeTag(it) }
+                .filter { it.isNotEmpty() }
+                .distinct()
+            is String -> raw
+                .split(",", ";")
+                .map { normalizeTag(it) }
+                .filter { it.isNotEmpty() }
+                .distinct()
+            else -> emptyList()
+        }
+    }
+
+    private fun normalizeTag(value: String): String {
+        return value.trim().lowercase()
     }
 }

@@ -1,37 +1,64 @@
 package com.todolist.app.ui.screens
 
 import android.app.DatePickerDialog
+import android.util.Log
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
@@ -40,16 +67,23 @@ import androidx.compose.ui.unit.sp
 import com.google.firebase.Timestamp
 import com.todolist.app.data.model.Task
 import com.todolist.app.data.model.TaskPriority
+import com.todolist.app.ui.TaskFilterPreferences
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
-private enum class TaskTab { OPEN, ARCHIVED }
+private enum class TaskTab { OPEN, DONE, ARCHIVED }
+private enum class TagFilterMode { OR, AND }
+private const val TAG_LOG = "TodoListTags"
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 fun TaskScreen(
     openTasks: List<Task>,
+    doneTasks: List<Task>,
     archivedTasks: List<Task>,
     isLoading: Boolean,
     errorMessage: String?,
@@ -58,85 +92,276 @@ fun TaskScreen(
     onChangePriority: (Task, TaskPriority) -> Unit,
     onToggleArchived: (Task) -> Unit,
     onDeleteTask: (Task) -> Unit,
+    onSaveTask: (task: Task, title: String, priority: TaskPriority, dueDate: Timestamp?, tagsText: String) -> Unit,
+    openFilterRequest: Int = 0,
+    openCreateRequest: Int = 0,
     modifier: Modifier = Modifier
 ) {
     var selectedTab by remember { mutableStateOf(TaskTab.OPEN) }
-    var title by remember { mutableStateOf("") }
-    var tagsInput by remember { mutableStateOf("") }
-    var selectedPriority by remember { mutableStateOf(TaskPriority.MEDIO) }
-    var selectedDueDate by remember { mutableStateOf<Timestamp?>(null) }
 
-    Column(modifier = modifier.fillMaxWidth()) {
-        CreateTaskForm(
-            title = title,
-            onTitleChange = { title = it },
-            tagsInput = tagsInput,
-            onTagsInputChange = { tagsInput = it },
-            selectedPriority = selectedPriority,
-            onPrioritySelected = { selectedPriority = it },
-            selectedDueDate = selectedDueDate,
-            onDueDateSelected = { selectedDueDate = it },
-            onClearDueDate = { selectedDueDate = null },
-            onAddClick = {
-                onAddTask(title, selectedPriority, selectedDueDate, tagsInput)
-                title = ""
-                tagsInput = ""
-                selectedPriority = TaskPriority.MEDIO
-                selectedDueDate = null
+    var showCreateSheet by remember { mutableStateOf(false) }
+    var createTitle by remember { mutableStateOf("") }
+    var createTagsInput by remember { mutableStateOf("") }
+    var createPriority by remember { mutableStateOf(TaskPriority.MEDIO) }
+    var createDueDate by remember { mutableStateOf<Timestamp?>(null) }
+
+    var editingTask by remember { mutableStateOf<Task?>(null) }
+    var editTitle by remember { mutableStateOf("") }
+    var editTagsInput by remember { mutableStateOf("") }
+    var editPriority by remember { mutableStateOf(TaskPriority.MEDIO) }
+    var editDueDate by remember { mutableStateOf<Timestamp?>(null) }
+    var searchQuery by remember { mutableStateOf("") }
+    var showTagFilterSheet by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    var selectedTags by remember { mutableStateOf(TaskFilterPreferences.getSelectedTags(context)) }
+    var draftSelectedTags by remember { mutableStateOf(selectedTags) }
+    val tagFilterMode = TagFilterMode.OR
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+
+    val availableTags = remember(openTasks, doneTasks, archivedTasks) {
+        (openTasks + doneTasks + archivedTasks)
+            .flatMap { it.tags }
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .toSet()
+            .sortedBy { it.lowercase() }
+    }
+
+    val normalizedQuery = searchQuery.trim()
+
+    val filteredOpenTasks = remember(openTasks, normalizedQuery, selectedTags, tagFilterMode) {
+        applyFilters(openTasks, normalizedQuery, selectedTags, tagFilterMode)
+    }
+    val filteredDoneTasks = remember(doneTasks, normalizedQuery, selectedTags, tagFilterMode) {
+        applyFilters(doneTasks, normalizedQuery, selectedTags, tagFilterMode)
+    }
+    val filteredArchivedTasks = remember(archivedTasks, normalizedQuery, selectedTags, tagFilterMode) {
+        applyFilters(archivedTasks, normalizedQuery, selectedTags, tagFilterMode)
+    }
+
+    LaunchedEffect(openFilterRequest) {
+        if (openFilterRequest > 0) {
+            draftSelectedTags = selectedTags
+            showTagFilterSheet = true
+        }
+    }
+
+    LaunchedEffect(openCreateRequest) {
+        if (openCreateRequest > 0) {
+            createTitle = ""
+            createTagsInput = ""
+            createPriority = TaskPriority.MEDIO
+            createDueDate = null
+            showCreateSheet = true
+        }
+    }
+
+    Box(modifier = modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                leadingIcon = {
+                    Icon(imageVector = Icons.Filled.Search, contentDescription = "Buscar")
+                },
+                label = { Text("Buscar tareas") }
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            val tabIndex = when (selectedTab) {
+                TaskTab.OPEN -> 0
+                TaskTab.DONE -> 1
+                TaskTab.ARCHIVED -> 2
             }
+            TabRow(selectedTabIndex = tabIndex) {
+                Tab(
+                    selected = selectedTab == TaskTab.OPEN,
+                    onClick = { selectedTab = TaskTab.OPEN },
+                    text = { Text("Abiertas (${filteredOpenTasks.size})") }
+                )
+                Tab(
+                    selected = selectedTab == TaskTab.DONE,
+                    onClick = { selectedTab = TaskTab.DONE },
+                    text = { Text("Hechas (${filteredDoneTasks.size})") }
+                )
+                Tab(
+                    selected = selectedTab == TaskTab.ARCHIVED,
+                    onClick = { selectedTab = TaskTab.ARCHIVED },
+                    text = { Text("Archivadas (${filteredArchivedTasks.size})") }
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            if (isLoading) {
+                CircularProgressIndicator()
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
+            errorMessage?.let {
+                Text(text = it, color = MaterialTheme.colorScheme.error)
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
+            if (selectedTab == TaskTab.OPEN) {
+                TaskList(
+                    tasks = filteredOpenTasks,
+                    showArchiveAsUnarchive = false,
+                    onToggleCompleted = onToggleCompleted,
+                    onChangePriority = onChangePriority,
+                    onToggleArchived = onToggleArchived,
+                    onDeleteTask = onDeleteTask,
+                    snackbarHostState = snackbarHostState,
+                    scope = scope,
+                    onEditTask = { task ->
+                        editingTask = task
+                        editTitle = task.title
+                        editTagsInput = task.tags.joinToString(",")
+                        editPriority = task.priority
+                        editDueDate = task.dueDate
+                    }
+                )
+            } else if (selectedTab == TaskTab.DONE) {
+                TaskList(
+                    tasks = filteredDoneTasks,
+                    showArchiveAsUnarchive = false,
+                    onToggleCompleted = onToggleCompleted,
+                    onChangePriority = onChangePriority,
+                    onToggleArchived = onToggleArchived,
+                    onDeleteTask = onDeleteTask,
+                    snackbarHostState = snackbarHostState,
+                    scope = scope,
+                    onEditTask = { task ->
+                        editingTask = task
+                        editTitle = task.title
+                        editTagsInput = task.tags.joinToString(",")
+                        editPriority = task.priority
+                        editDueDate = task.dueDate
+                    }
+                )
+            } else {
+                TaskList(
+                    tasks = filteredArchivedTasks,
+                    showArchiveAsUnarchive = true,
+                    onToggleCompleted = onToggleCompleted,
+                    onChangePriority = onChangePriority,
+                    onToggleArchived = onToggleArchived,
+                    onDeleteTask = onDeleteTask,
+                    snackbarHostState = snackbarHostState,
+                    scope = scope,
+                    onEditTask = { task ->
+                        editingTask = task
+                        editTitle = task.title
+                        editTagsInput = task.tags.joinToString(",")
+                        editPriority = task.priority
+                        editDueDate = task.dueDate
+                    }
+                )
+            }
+        }
+
+        FloatingActionButton(
+            onClick = {
+                createTitle = ""
+                createTagsInput = ""
+                createPriority = TaskPriority.MEDIO
+                createDueDate = null
+                showCreateSheet = true
+            },
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(16.dp)
+        ) {
+            Icon(imageVector = Icons.Filled.Add, contentDescription = "Nueva tarea")
+        }
+
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(horizontal = 16.dp, vertical = 24.dp)
         )
+    }
 
-        Spacer(modifier = Modifier.height(12.dp))
-
-        TabRow(selectedTabIndex = if (selectedTab == TaskTab.OPEN) 0 else 1) {
-            Tab(
-                selected = selectedTab == TaskTab.OPEN,
-                onClick = { selectedTab = TaskTab.OPEN },
-                text = { Text("Abiertas") }
-            )
-            Tab(
-                selected = selectedTab == TaskTab.ARCHIVED,
-                onClick = { selectedTab = TaskTab.ARCHIVED },
-                text = { Text("Archivadas") }
+    if (showCreateSheet) {
+        ModalBottomSheet(onDismissRequest = { showCreateSheet = false }) {
+            NewTaskSheetContent(
+                title = createTitle,
+                onTitleChange = { createTitle = it },
+                tagsInput = createTagsInput,
+                onTagsInputChange = { createTagsInput = it },
+                selectedPriority = createPriority,
+                onPrioritySelected = { createPriority = it },
+                selectedDueDate = createDueDate,
+                onDueDateSelected = { createDueDate = it },
+                onClearDueDate = { createDueDate = null },
+                onCreate = {
+                    onAddTask(createTitle, createPriority, createDueDate, createTagsInput)
+                    showCreateSheet = false
+                    createTitle = ""
+                    createTagsInput = ""
+                    createPriority = TaskPriority.MEDIO
+                    createDueDate = null
+                },
+                onCancel = { showCreateSheet = false }
             )
         }
+    }
 
-        Spacer(modifier = Modifier.height(8.dp))
-
-        if (isLoading) {
-            CircularProgressIndicator()
-            Spacer(modifier = Modifier.height(8.dp))
-        }
-
-        errorMessage?.let {
-            Text(text = it, color = MaterialTheme.colorScheme.error)
-            Spacer(modifier = Modifier.height(8.dp))
-        }
-
-        if (selectedTab == TaskTab.OPEN) {
-            TaskList(
-                tasks = openTasks,
-                showArchiveAsUnarchive = false,
-                onToggleCompleted = onToggleCompleted,
-                onChangePriority = onChangePriority,
-                onToggleArchived = onToggleArchived,
-                onDeleteTask = onDeleteTask
+    if (showTagFilterSheet) {
+        ModalBottomSheet(onDismissRequest = { showTagFilterSheet = false }) {
+            TagFilterSheet(
+                availableTags = availableTags,
+                selectedTags = draftSelectedTags,
+                onToggleTag = { tag ->
+                    draftSelectedTags = if (tag in draftSelectedTags) {
+                        draftSelectedTags - tag
+                    } else {
+                        draftSelectedTags + tag
+                    }
+                },
+                onClear = { draftSelectedTags = emptySet() },
+                onApply = {
+                    selectedTags = draftSelectedTags
+                    TaskFilterPreferences.saveSelectedTags(context, selectedTags)
+                    showTagFilterSheet = false
+                }
             )
-        } else {
-            TaskList(
-                tasks = archivedTasks,
-                showArchiveAsUnarchive = true,
-                onToggleCompleted = onToggleCompleted,
-                onChangePriority = onChangePriority,
-                onToggleArchived = onToggleArchived,
-                onDeleteTask = onDeleteTask
+        }
+    }
+
+    editingTask?.let { task ->
+        ModalBottomSheet(onDismissRequest = { editingTask = null }) {
+            EditTaskSheetContent(
+                title = editTitle,
+                onTitleChange = { editTitle = it },
+                tagsInput = editTagsInput,
+                onTagsInputChange = { editTagsInput = it },
+                selectedPriority = editPriority,
+                onPrioritySelected = { editPriority = it },
+                selectedDueDate = editDueDate,
+                onDueDateSelected = { editDueDate = it },
+                onClearDueDate = { editDueDate = null },
+                onSave = {
+                    onSaveTask(task, editTitle, editPriority, editDueDate, editTagsInput)
+                    editingTask = null
+                },
+                onCancel = { editingTask = null },
+                onDelete = {
+                    onDeleteTask(task)
+                    editingTask = null
+                }
             )
         }
     }
 }
 
 @Composable
-private fun CreateTaskForm(
+private fun NewTaskSheetContent(
     title: String,
     onTitleChange: (String) -> Unit,
     tagsInput: String,
@@ -146,9 +371,94 @@ private fun CreateTaskForm(
     selectedDueDate: Timestamp?,
     onDueDateSelected: (Timestamp?) -> Unit,
     onClearDueDate: () -> Unit,
-    onAddClick: () -> Unit
+    onCreate: () -> Unit,
+    onCancel: () -> Unit
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    val focusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(Unit) {
+        focusRequester.requestFocus()
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Text("Nueva tarea", style = MaterialTheme.typography.titleMedium)
+
+        OutlinedTextField(
+            value = title,
+            onValueChange = onTitleChange,
+            modifier = Modifier
+                .fillMaxWidth()
+                .focusRequester(focusRequester),
+            singleLine = true,
+            label = { Text("Titulo") }
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            PrioritySelector(
+                selected = selectedPriority,
+                onSelected = onPrioritySelected,
+                modifier = Modifier.weight(1f)
+            )
+            DueDateSelector(
+                selectedDueDate = selectedDueDate,
+                onDueDateSelected = onDueDateSelected,
+                onClearDueDate = onClearDueDate,
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        OutlinedTextField(
+            value = tagsInput,
+            onValueChange = onTagsInputChange,
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            label = { Text("Tags (coma)") }
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Button(onClick = onCancel, modifier = Modifier.weight(1f)) {
+                Text("Cancelar")
+            }
+            Button(onClick = onCreate, modifier = Modifier.weight(1f), enabled = title.isNotBlank()) {
+                Text("Crear")
+            }
+        }
+    }
+}
+
+@Composable
+private fun EditTaskSheetContent(
+    title: String,
+    onTitleChange: (String) -> Unit,
+    tagsInput: String,
+    onTagsInputChange: (String) -> Unit,
+    selectedPriority: TaskPriority,
+    onPrioritySelected: (TaskPriority) -> Unit,
+    selectedDueDate: Timestamp?,
+    onDueDateSelected: (Timestamp?) -> Unit,
+    onClearDueDate: () -> Unit,
+    onSave: () -> Unit,
+    onCancel: () -> Unit,
+    onDelete: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
         OutlinedTextField(
             value = title,
             onValueChange = onTitleChange,
@@ -183,12 +493,111 @@ private fun CreateTaskForm(
             label = { Text("Tags (coma)") }
         )
 
-        Button(
-            onClick = onAddClick,
-            enabled = title.isNotBlank(),
-            modifier = Modifier.align(Alignment.End)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text("Anadir")
+            Button(onClick = onCancel, modifier = Modifier.weight(1f)) {
+                Text("Cancelar")
+            }
+            Button(onClick = onSave, modifier = Modifier.weight(1f), enabled = title.isNotBlank()) {
+                Text("Guardar")
+            }
+        }
+
+        Button(onClick = onDelete, modifier = Modifier.fillMaxWidth()) {
+            Text("Borrar")
+        }
+    }
+}
+
+private fun applyFilters(
+    tasks: List<Task>,
+    searchQuery: String,
+    selectedTags: Set<String>,
+    mode: TagFilterMode
+): List<Task> {
+    var filtered = tasks
+    val normalizedSelectedTags = selectedTags
+        .map { it.trim().lowercase() }
+        .filter { it.isNotEmpty() }
+        .toSet()
+
+    if (searchQuery.isNotEmpty()) {
+        filtered = filtered.filter { it.title.contains(searchQuery, ignoreCase = true) }
+    }
+
+    val beforeTagsCount = filtered.size
+    if (normalizedSelectedTags.isNotEmpty()) {
+        filtered = when (mode) {
+            TagFilterMode.OR -> filtered.filter { task ->
+                task.tags.any { it.trim().lowercase() in normalizedSelectedTags }
+            }
+            TagFilterMode.AND -> filtered.filter { task ->
+                normalizedSelectedTags.all { selected ->
+                    task.tags.any { it.trim().lowercase() == selected }
+                }
+            }
+        }
+    }
+    val afterTagsCount = filtered.size
+
+    Log.d(
+        TAG_LOG,
+        "applyFilters selectedTags=$normalizedSelectedTags beforeTags=$beforeTagsCount afterTags=$afterTagsCount mode=$mode search='$searchQuery'"
+    )
+
+    return filtered
+}
+
+@Composable
+private fun TagFilterSheet(
+    availableTags: List<String>,
+    selectedTags: Set<String>,
+    onToggleTag: (String) -> Unit,
+    onClear: () -> Unit,
+    onApply: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text("Filtrar por tags", style = MaterialTheme.typography.titleMedium)
+
+        if (availableTags.isEmpty()) {
+            Text("No hay tags disponibles")
+        } else {
+            LazyColumn(modifier = Modifier.height(220.dp)) {
+                items(availableTags, key = { it }) { tag ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onToggleTag(tag) }
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = tag in selectedTags,
+                            onCheckedChange = { onToggleTag(tag) }
+                        )
+                        Text(tag)
+                    }
+                }
+            }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Button(onClick = onClear, modifier = Modifier.weight(1f)) {
+                Text("Limpiar")
+            }
+            Button(onClick = onApply, modifier = Modifier.weight(1f)) {
+                Text("Aplicar")
+            }
         }
     }
 }
@@ -200,23 +609,167 @@ private fun TaskList(
     onToggleCompleted: (Task) -> Unit,
     onChangePriority: (Task, TaskPriority) -> Unit,
     onToggleArchived: (Task) -> Unit,
-    onDeleteTask: (Task) -> Unit
+    onDeleteTask: (Task) -> Unit,
+    snackbarHostState: SnackbarHostState,
+    scope: kotlinx.coroutines.CoroutineScope,
+    onEditTask: (Task) -> Unit
 ) {
     if (tasks.isEmpty()) {
         Text("Sin tareas")
         return
     }
 
-    LazyColumn {
+    LazyColumn(contentPadding = PaddingValues(bottom = 96.dp)) {
         items(tasks, key = { it.id }) { task ->
-            TaskRow(
-                task = task,
-                showArchiveAsUnarchive = showArchiveAsUnarchive,
-                onToggleCompleted = { onToggleCompleted(task) },
-                onChangePriority = { onChangePriority(task, it) },
-                onToggleArchived = { onToggleArchived(task) },
-                onDeleteTask = { onDeleteTask(task) }
-            )
+            if (showArchiveAsUnarchive) {
+                SwipeTaskItem(
+                    startToEndLabel = "Desarchivar",
+                    endToStartLabel = null,
+                    enableDismissFromStartToEnd = true,
+                    enableDismissFromEndToStart = false,
+                    onStartToEnd = {
+                        onToggleArchived(task)
+                        scope.launch {
+                            val result = snackbarHostState.showSnackbar(
+                                message = "Tarea desarchivada",
+                                actionLabel = "Deshacer",
+                                duration = SnackbarDuration.Short
+                            )
+                            if (result == SnackbarResult.ActionPerformed) {
+                                onToggleArchived(task)
+                            }
+                        }
+                    },
+                    onEndToStart = null
+                ) {
+                    TaskRow(
+                        task = task,
+                        showArchiveAsUnarchive = true,
+                        onToggleCompleted = { onToggleCompleted(task) },
+                        onChangePriority = { onChangePriority(task, it) },
+                        onToggleArchived = { onToggleArchived(task) },
+                        onDeleteTask = { onDeleteTask(task) },
+                        onEditTask = { onEditTask(task) }
+                    )
+                }
+            } else {
+                SwipeTaskItem(
+                    startToEndLabel = "Hecho",
+                    endToStartLabel = "Archivar",
+                    enableDismissFromStartToEnd = true,
+                    enableDismissFromEndToStart = true,
+                    onStartToEnd = { onToggleCompleted(task) },
+                    onEndToStart = {
+                        onToggleArchived(task)
+                        scope.launch {
+                            val result = snackbarHostState.showSnackbar(
+                                message = "Tarea archivada",
+                                actionLabel = "Deshacer",
+                                duration = SnackbarDuration.Short
+                            )
+                            if (result == SnackbarResult.ActionPerformed) {
+                                onToggleArchived(task)
+                            }
+                        }
+                    }
+                ) {
+                    TaskRow(
+                        task = task,
+                        showArchiveAsUnarchive = false,
+                        onToggleCompleted = { onToggleCompleted(task) },
+                        onChangePriority = { onChangePriority(task, it) },
+                        onToggleArchived = { onToggleArchived(task) },
+                        onDeleteTask = { onDeleteTask(task) },
+                        onEditTask = { onEditTask(task) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+@OptIn(ExperimentalMaterial3Api::class)
+private fun SwipeTaskItem(
+    startToEndLabel: String?,
+    endToStartLabel: String?,
+    enableDismissFromStartToEnd: Boolean,
+    enableDismissFromEndToStart: Boolean,
+    onStartToEnd: (() -> Unit)?,
+    onEndToStart: (() -> Unit)?,
+    content: @Composable () -> Unit
+) {
+    var isVisible by remember { mutableStateOf(true) }
+    var pendingAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+
+    val dismissState = rememberSwipeToDismissBoxState(
+        positionalThreshold = { totalDistance -> totalDistance * 0.35f },
+        confirmValueChange = { dismissValue ->
+            when (dismissValue) {
+                SwipeToDismissBoxValue.StartToEnd -> {
+                    if (!enableDismissFromStartToEnd || onStartToEnd == null || !isVisible) return@rememberSwipeToDismissBoxState false
+                    pendingAction = onStartToEnd
+                    isVisible = false
+                    false
+                }
+                SwipeToDismissBoxValue.EndToStart -> {
+                    if (!enableDismissFromEndToStart || onEndToStart == null || !isVisible) return@rememberSwipeToDismissBoxState false
+                    pendingAction = onEndToStart
+                    isVisible = false
+                    false
+                }
+                SwipeToDismissBoxValue.Settled -> false
+            }
+        }
+    )
+
+    LaunchedEffect(isVisible) {
+        if (!isVisible) {
+            delay(180)
+            pendingAction?.invoke()
+            pendingAction = null
+        }
+    }
+
+    AnimatedVisibility(
+        visible = isVisible,
+        exit = fadeOut() + shrinkVertically()
+    ) {
+        SwipeToDismissBox(
+            state = dismissState,
+            enableDismissFromStartToEnd = enableDismissFromStartToEnd,
+            enableDismissFromEndToStart = enableDismissFromEndToStart,
+            backgroundContent = {
+                val direction = dismissState.dismissDirection
+                val label = when (direction) {
+                    SwipeToDismissBoxValue.StartToEnd -> startToEndLabel
+                    SwipeToDismissBoxValue.EndToStart -> endToStartLabel
+                    SwipeToDismissBoxValue.Settled -> null
+                }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 14.dp),
+                    contentAlignment = when (direction) {
+                        SwipeToDismissBoxValue.StartToEnd -> Alignment.CenterStart
+                        SwipeToDismissBoxValue.EndToStart -> Alignment.CenterEnd
+                        SwipeToDismissBoxValue.Settled -> Alignment.CenterStart
+                    }
+                ) {
+                    if (label != null) {
+                        Text(label, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RectangleShape)
+            ) {
+                content()
+            }
             HorizontalDivider()
         }
     }
@@ -229,14 +782,16 @@ private fun TaskRow(
     onToggleCompleted: () -> Unit,
     onChangePriority: (TaskPriority) -> Unit,
     onToggleArchived: () -> Unit,
-    onDeleteTask: () -> Unit
+    onDeleteTask: () -> Unit,
+    onEditTask: () -> Unit
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 10.dp),
+            .clickable(onClick = onEditTask)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
@@ -245,11 +800,7 @@ private fun TaskRow(
             fontSize = 16.sp,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            color = if (task.completed) {
-                MaterialTheme.colorScheme.onSurfaceVariant
-            } else {
-                MaterialTheme.colorScheme.onSurface
-            },
+            color = if (task.completed) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
             textDecoration = if (task.completed) TextDecoration.LineThrough else TextDecoration.None
         )
 

@@ -40,6 +40,8 @@ data class Task(
 )
 
 data class TaskPatch(
+    val title: String? = null,
+    val tags: List<String>? = null,
     val priority: TaskPriority? = null,
     val dueDate: Timestamp? = null,
     val setDueDate: Boolean = false,

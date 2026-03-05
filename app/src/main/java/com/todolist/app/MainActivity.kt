@@ -1,26 +1,36 @@
 package com.todolist.app
 
 import android.content.Context
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -32,6 +42,9 @@ import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import androidx.credentials.exceptions.GetCredentialException
 import androidx.lifecycle.ViewModel
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.MoreVert
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.android.libraries.identity.googleid.GoogleIdTokenParsingException
@@ -97,20 +110,36 @@ class AuthViewModel : ViewModel() {
 }
 
 class MainActivity : ComponentActivity() {
+    companion object {
+        const val EXTRA_OPEN_CREATE_TASK = "open_create_task"
+    }
+
     private val authViewModel: AuthViewModel by viewModels()
     private val taskViewModel: TaskViewModel by viewModels()
+    private val openCreateRequest = mutableStateOf(0)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (intent?.getBooleanExtra(EXTRA_OPEN_CREATE_TASK, false) == true) {
+            openCreateRequest.value += 1
+        }
         enableEdgeToEdge()
         setContent {
             TodoListTheme {
                 AuthGate(
                     viewModel = authViewModel,
                     taskViewModel = taskViewModel,
+                    openCreateRequest = openCreateRequest.value,
                     modifier = Modifier.fillMaxSize()
                 )
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        if (intent.getBooleanExtra(EXTRA_OPEN_CREATE_TASK, false)) {
+            openCreateRequest.value += 1
         }
     }
 }
@@ -119,6 +148,7 @@ class MainActivity : ComponentActivity() {
 private fun AuthGate(
     viewModel: AuthViewModel,
     taskViewModel: TaskViewModel,
+    openCreateRequest: Int,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -152,8 +182,6 @@ private fun AuthGate(
         )
     } else {
         HomeScreen(
-            email = uiState.user?.email ?: "No email",
-            uid = uiState.user?.uid.orEmpty(),
             taskUiState = taskUiState,
             modifier = modifier,
             onAddTask = taskViewModel::addTask,
@@ -161,6 +189,8 @@ private fun AuthGate(
             onChangePriority = taskViewModel::changePriority,
             onToggleArchived = taskViewModel::toggleArchived,
             onDeleteTask = taskViewModel::deleteTask,
+            onSaveTask = taskViewModel::saveTaskEdits,
+            openCreateRequest = openCreateRequest,
             onLogout = {
                 viewModel.onSignedOut()
                 scope.launch {
@@ -203,30 +233,58 @@ private fun LoginScreen(
 
 @Composable
 private fun HomeScreen(
-    email: String,
-    uid: String,
     taskUiState: TaskUiState,
     onAddTask: (String, TaskPriority, Timestamp?, String) -> Unit,
     onToggleCompleted: (Task) -> Unit,
     onChangePriority: (Task, TaskPriority) -> Unit,
     onToggleArchived: (Task) -> Unit,
     onDeleteTask: (Task) -> Unit,
+    onSaveTask: (Task, String, TaskPriority, Timestamp?, String) -> Unit,
+    openCreateRequest: Int,
     onLogout: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var menuExpanded by remember { mutableStateOf(false) }
+    var openFilterRequest by remember { mutableStateOf(0) }
+
     Column(
         modifier = modifier.padding(24.dp),
         verticalArrangement = Arrangement.Top,
         horizontalAlignment = Alignment.Start
     ) {
-        Text(text = "Home", style = MaterialTheme.typography.headlineMedium)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(text = "Tareas", style = MaterialTheme.typography.headlineMedium)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = { openFilterRequest += 1 }) {
+                    Icon(imageVector = Icons.Filled.FilterList, contentDescription = "Filtrar")
+                }
+                Box {
+                IconButton(onClick = { menuExpanded = true }) {
+                    Icon(imageVector = Icons.Filled.MoreVert, contentDescription = "Menu")
+                }
+                DropdownMenu(
+                    expanded = menuExpanded,
+                    onDismissRequest = { menuExpanded = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Salir") },
+                        onClick = {
+                            menuExpanded = false
+                            onLogout()
+                        }
+                    )
+                }
+                }
+            }
+        }
         Spacer(modifier = Modifier.height(12.dp))
-        Text(text = "Email: $email")
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(text = "UID: $uid")
-        Spacer(modifier = Modifier.height(16.dp))
         TaskScreen(
             openTasks = taskUiState.openTasks,
+            doneTasks = taskUiState.doneTasks,
             archivedTasks = taskUiState.archivedTasks,
             isLoading = taskUiState.isLoading,
             errorMessage = taskUiState.errorMessage,
@@ -235,12 +293,11 @@ private fun HomeScreen(
             onChangePriority = onChangePriority,
             onToggleArchived = onToggleArchived,
             onDeleteTask = onDeleteTask,
-            modifier = Modifier
+            onSaveTask = onSaveTask,
+            openFilterRequest = openFilterRequest,
+            openCreateRequest = openCreateRequest,
+            modifier = Modifier.weight(1f)
         )
-        Spacer(modifier = Modifier.height(16.dp))
-        Button(onClick = onLogout) {
-            Text("Salir")
-        }
     }
 }
 

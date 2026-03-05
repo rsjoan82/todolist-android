@@ -21,6 +21,7 @@ import kotlinx.coroutines.launch
 data class TaskUiState(
     val user: FirebaseUser? = null,
     val openTasks: List<Task> = emptyList(),
+    val doneTasks: List<Task> = emptyList(),
     val archivedTasks: List<Task> = emptyList(),
     val isLoading: Boolean = false,
     val errorMessage: String? = null
@@ -35,6 +36,7 @@ class TaskViewModel(
     val uiState: StateFlow<TaskUiState> = _uiState.asStateFlow()
 
     private var openTasksJob: Job? = null
+    private var doneTasksJob: Job? = null
     private var archivedTasksJob: Job? = null
 
     private val authStateListener = FirebaseAuth.AuthStateListener { firebaseAuth ->
@@ -57,6 +59,7 @@ class TaskViewModel(
 
     override fun onCleared() {
         openTasksJob?.cancel()
+        doneTasksJob?.cancel()
         archivedTasksJob?.cancel()
         auth.removeAuthStateListener(authStateListener)
         super.onCleared()
@@ -104,6 +107,39 @@ class TaskViewModel(
         updateTask(task.id, TaskPatch(dueDate = dueDate, setDueDate = true))
     }
 
+    fun saveTaskEdits(
+        task: Task,
+        title: String,
+        priority: TaskPriority,
+        dueDate: Timestamp?,
+        tagsText: String
+    ) {
+        val cleanTitle = title.trim()
+        val cleanTags = tagsText
+            .split(",")
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .distinct()
+
+        val titleChanged = cleanTitle.isNotBlank() && cleanTitle != task.title
+        val priorityChanged = priority != task.priority
+        val dueDateChanged = !sameTimestamp(dueDate, task.dueDate)
+        val tagsChanged = cleanTags != task.tags
+
+        if (!titleChanged && !priorityChanged && !dueDateChanged && !tagsChanged) return
+
+        updateTask(
+            task.id,
+            TaskPatch(
+                title = if (titleChanged) cleanTitle else null,
+                priority = if (priorityChanged) priority else null,
+                dueDate = dueDate,
+                setDueDate = dueDateChanged,
+                tags = if (tagsChanged) cleanTags else null
+            )
+        )
+    }
+
     fun deleteTask(task: Task) {
         val uid = _uiState.value.user?.uid ?: return
         if (task.id.isBlank()) return
@@ -134,16 +170,29 @@ class TaskViewModel(
         }
     }
 
+    private fun sameTimestamp(a: Timestamp?, b: Timestamp?): Boolean {
+        if (a == null && b == null) return true
+        if (a == null || b == null) return false
+        return a.seconds == b.seconds && a.nanoseconds == b.nanoseconds
+    }
+
     private fun clearTasks() {
         openTasksJob?.cancel()
+        doneTasksJob?.cancel()
         archivedTasksJob?.cancel()
         _uiState.update {
-            it.copy(openTasks = emptyList(), archivedTasks = emptyList(), isLoading = false)
+            it.copy(
+                openTasks = emptyList(),
+                doneTasks = emptyList(),
+                archivedTasks = emptyList(),
+                isLoading = false
+            )
         }
     }
 
     private fun observeTasks(uid: String) {
         openTasksJob?.cancel()
+        doneTasksJob?.cancel()
         archivedTasksJob?.cancel()
 
         _uiState.update { it.copy(isLoading = true, errorMessage = null) }
@@ -160,6 +209,21 @@ class TaskViewModel(
                 }
                 .collect { tasks ->
                     _uiState.update { it.copy(openTasks = tasks, isLoading = false) }
+                }
+        }
+
+        doneTasksJob = viewModelScope.launch {
+            repository.getDoneTasks(uid)
+                .catch { error ->
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            errorMessage = error.message ?: "No se pudieron cargar tareas hechas"
+                        )
+                    }
+                }
+                .collect { tasks ->
+                    _uiState.update { it.copy(doneTasks = tasks, isLoading = false) }
                 }
         }
 
