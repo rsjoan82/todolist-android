@@ -47,12 +47,15 @@ class TaskRepository(
             .toSet()
 
         return tasksCollection(uid)
-            .whereEqualTo("archived", false)
             .get()
             .await()
             .documents
             .mapNotNull { it.toTaskOrNull() }
-            .filter { it.status != TaskStatus.DONE }
+            .filter { task ->
+                !task.archived &&
+                    task.status != TaskStatus.DONE &&
+                    !task.completed
+            }
             .filter { task ->
                 if (normalizedSelectedTags.isEmpty()) {
                     true
@@ -74,8 +77,9 @@ class TaskRepository(
         dueDate: Timestamp?,
         tags: List<String>
     ) {
+        require(uid.isNotBlank()) { "UID invalido para crear tarea" }
         val cleanTitle = title.trim()
-        if (cleanTitle.isEmpty()) return
+        require(cleanTitle.isNotEmpty()) { "El titulo no puede estar vacio" }
 
         val cleanTags = tags
             .map { normalizeTag(it) }

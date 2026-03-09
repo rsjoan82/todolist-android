@@ -1,28 +1,35 @@
 package com.todolist.app.viewmodel
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.firebase.Timestamp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
+import com.google.firebase.firestore.FirebaseFirestoreException
 import com.todolist.app.data.model.Task
 import com.todolist.app.data.model.TaskPatch
 import com.todolist.app.data.model.TaskPriority
 import com.todolist.app.data.model.TaskStatus
 import com.todolist.app.data.repository.TaskRepository
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
+import java.net.UnknownHostException
 
 data class TaskUiState(
     val user: FirebaseUser? = null,
     val openTasks: List<Task> = emptyList(),
     val doneTasks: List<Task> = emptyList(),
     val archivedTasks: List<Task> = emptyList(),
+    val isCreating: Boolean = false,
+    val createError: String? = null,
     val isLoading: Boolean = false,
     val errorMessage: String? = null
 )
@@ -31,6 +38,9 @@ class TaskViewModel(
     private val auth: FirebaseAuth = FirebaseAuth.getInstance(),
     private val repository: TaskRepository = TaskRepository()
 ) : ViewModel() {
+    companion object {
+        private const val LOG_TAG = "TodoListCreate"
+    }
 
     private val _uiState = MutableStateFlow(TaskUiState(user = auth.currentUser))
     val uiState: StateFlow<TaskUiState> = _uiState.asStateFlow()
@@ -65,22 +75,99 @@ class TaskViewModel(
         super.onCleared()
     }
 
-    fun addTask(title: String, priority: TaskPriority, dueDate: Timestamp?, tagsText: String) {
-        val uid = _uiState.value.user?.uid ?: return
+    fun addTask(
+        title: String,
+        priority: TaskPriority,
+        dueDate: Timestamp?,
+        tagsText: String,
+        onResult: (Result<Unit>) -> Unit = {}
+    ) {
+        val uid = _uiState.value.user?.uid
+        if (uid == null) {
+            val result = Result.failure<Unit>(IllegalStateException("No hay sesion"))
+            _uiState.update {
+                it.copy(
+                    isCreating = false,
+                    createError = "No hay sesion",
+                    errorMessage = "No hay sesion"
+                )
+            }
+            Log.e(LOG_TAG, "create start failed: no session")
+            onResult(result)
+            return
+        }
+
+        if (title.trim().isEmpty()) {
+            val result = Result.failure<Unit>(IllegalArgumentException("El titulo no puede estar vacio"))
+            _uiState.update {
+                it.copy(
+                    isCreating = false,
+                    createError = "El titulo no puede estar vacio",
+                    errorMessage = "El titulo no puede estar vacio"
+                )
+            }
+            Log.e(LOG_TAG, "create start failed: empty title")
+            onResult(result)
+            return
+        }
+
         val tags = tagsText
             .split(",")
             .map { it.trim() }
             .filter { it.isNotEmpty() }
 
+        _uiState.update { it.copy(isCreating = true, createError = null) }
+        Log.d(LOG_TAG, "create start uid=$uid title=${title.trim()}")
+
         viewModelScope.launch {
-            runCatching {
-                repository.addTask(uid, title, priority, dueDate, tags)
-            }.onFailure { error ->
-                _uiState.update {
-                    it.copy(errorMessage = error.message ?: "No se pudo anadir la tarea")
+            val result = try {
+                withTimeout(10_000L) {
+                    repository.addTask(uid, title, priority, dueDate, tags)
                 }
+                Log.d(LOG_TAG, "create success users/$uid/tasks")
+                _uiState.update {
+                    it.copy(createError = null, errorMessage = null)
+                }
+                Result.success(Unit)
+            } catch (error: Throwable) {
+                Log.e(LOG_TAG, "create error uid=$uid", error)
+                val message = mapCreateErrorMessage(error)
+                _uiState.update {
+                    it.copy(
+                        createError = message,
+                        errorMessage = message
+                    )
+                }
+                Result.failure(error)
+            } finally {
+                _uiState.update { it.copy(isCreating = false) }
             }
+            onResult(result)
         }
+    }
+
+    fun clearCreateError() {
+        _uiState.update { it.copy(createError = null) }
+    }
+
+    private fun mapCreateErrorMessage(error: Throwable): String {
+        if (error is TimeoutCancellationException) {
+            return "Sin conexion: no se pudo guardar"
+        }
+
+        if (error is FirebaseFirestoreException &&
+            error.code == FirebaseFirestoreException.Code.UNAVAILABLE
+        ) {
+            return "Sin conexion: no se pudo guardar"
+        }
+
+        val hasUnknownHost = generateSequence(error) { it.cause }
+            .any { it is UnknownHostException }
+        if (hasUnknownHost) {
+            return "Sin conexion: no se pudo guardar"
+        }
+
+        return error.message ?: "No se pudo guardar la tarea"
     }
 
     fun toggleCompleted(task: Task) {

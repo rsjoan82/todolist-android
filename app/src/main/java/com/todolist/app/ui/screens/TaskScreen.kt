@@ -5,6 +5,7 @@ import android.util.Log
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -57,6 +59,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
@@ -64,6 +67,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.graphics.Color
 import com.google.firebase.Timestamp
 import com.todolist.app.data.model.Task
 import com.todolist.app.data.model.TaskPriority
@@ -78,6 +82,7 @@ import kotlinx.coroutines.launch
 private enum class TaskTab { OPEN, DONE, ARCHIVED }
 private enum class TagFilterMode { OR, AND }
 private const val TAG_LOG = "TodoListTags"
+private const val TAG_UNDO = "TodoListUndo"
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
@@ -87,12 +92,22 @@ fun TaskScreen(
     archivedTasks: List<Task>,
     isLoading: Boolean,
     errorMessage: String?,
-    onAddTask: (title: String, priority: TaskPriority, dueDate: Timestamp?, tagsText: String) -> Unit,
+    onAddTask: (
+        title: String,
+        priority: TaskPriority,
+        dueDate: Timestamp?,
+        tagsText: String,
+        onResult: (Result<Unit>) -> Unit
+    ) -> Unit,
+    isCreating: Boolean,
+    createError: String?,
+    onClearCreateError: () -> Unit,
     onToggleCompleted: (Task) -> Unit,
     onChangePriority: (Task, TaskPriority) -> Unit,
     onToggleArchived: (Task) -> Unit,
     onDeleteTask: (Task) -> Unit,
     onSaveTask: (task: Task, title: String, priority: TaskPriority, dueDate: Timestamp?, tagsText: String) -> Unit,
+    hasSession: Boolean,
     openFilterRequest: Int = 0,
     openCreateRequest: Int = 0,
     modifier: Modifier = Modifier
@@ -118,6 +133,28 @@ fun TaskScreen(
     val tagFilterMode = TagFilterMode.OR
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    var lastArchivedTask by remember { mutableStateOf<Task?>(null) }
+
+    val onArchiveWithUndo: (Task) -> Unit = { task ->
+        onToggleArchived(task)
+        lastArchivedTask = task
+        Log.d(TAG_UNDO, "Archived task id=${task.id}")
+        scope.launch {
+            val result = snackbarHostState.showSnackbar(
+                message = "Tarea archivada",
+                actionLabel = "Deshacer",
+                duration = SnackbarDuration.Short
+            )
+            if (result == SnackbarResult.ActionPerformed && lastArchivedTask?.id == task.id) {
+                onToggleArchived(task)
+                Log.d(TAG_UNDO, "Undo archive id=${task.id}")
+                lastArchivedTask = null
+            } else if (lastArchivedTask?.id == task.id) {
+                Log.d(TAG_UNDO, "Archive kept id=${task.id}")
+                lastArchivedTask = null
+            }
+        }
+    }
 
     val availableTags = remember(openTasks, doneTasks, archivedTasks) {
         (openTasks + doneTasks + archivedTasks)
@@ -153,8 +190,18 @@ fun TaskScreen(
             createTagsInput = ""
             createPriority = TaskPriority.MEDIO
             createDueDate = null
+            onClearCreateError()
             showCreateSheet = true
         }
+    }
+
+    val openCreateSheet = {
+        createTitle = ""
+        createTagsInput = ""
+        createPriority = TaskPriority.MEDIO
+        createDueDate = null
+        onClearCreateError()
+        showCreateSheet = true
     }
 
     Box(modifier = modifier.fillMaxSize()) {
@@ -208,70 +255,83 @@ fun TaskScreen(
             }
 
             if (selectedTab == TaskTab.OPEN) {
-                TaskList(
-                    tasks = filteredOpenTasks,
-                    showArchiveAsUnarchive = false,
-                    onToggleCompleted = onToggleCompleted,
-                    onChangePriority = onChangePriority,
-                    onToggleArchived = onToggleArchived,
-                    onDeleteTask = onDeleteTask,
-                    snackbarHostState = snackbarHostState,
-                    scope = scope,
-                    onEditTask = { task ->
-                        editingTask = task
-                        editTitle = task.title
-                        editTagsInput = task.tags.joinToString(",")
-                        editPriority = task.priority
-                        editDueDate = task.dueDate
-                    }
-                )
+                if (filteredOpenTasks.isEmpty()) {
+                    EmptyTabState(
+                        message = "No hay tareas abiertas",
+                        buttonText = "Crear tarea",
+                        onButtonClick = openCreateSheet
+                    )
+                } else {
+                    TaskList(
+                        tasks = filteredOpenTasks,
+                        showArchiveAsUnarchive = false,
+                        onToggleCompleted = onToggleCompleted,
+                        onChangePriority = onChangePriority,
+                        onToggleArchived = onToggleArchived,
+                        onArchiveWithUndo = onArchiveWithUndo,
+                        onDeleteTask = onDeleteTask,
+                        snackbarHostState = snackbarHostState,
+                        scope = scope,
+                        onEditTask = { task ->
+                            editingTask = task
+                            editTitle = task.title
+                            editTagsInput = task.tags.joinToString(",")
+                            editPriority = task.priority
+                            editDueDate = task.dueDate
+                        }
+                    )
+                }
             } else if (selectedTab == TaskTab.DONE) {
-                TaskList(
-                    tasks = filteredDoneTasks,
-                    showArchiveAsUnarchive = false,
-                    onToggleCompleted = onToggleCompleted,
-                    onChangePriority = onChangePriority,
-                    onToggleArchived = onToggleArchived,
-                    onDeleteTask = onDeleteTask,
-                    snackbarHostState = snackbarHostState,
-                    scope = scope,
-                    onEditTask = { task ->
-                        editingTask = task
-                        editTitle = task.title
-                        editTagsInput = task.tags.joinToString(",")
-                        editPriority = task.priority
-                        editDueDate = task.dueDate
-                    }
-                )
+                if (filteredDoneTasks.isEmpty()) {
+                    EmptyTabState(message = "No hay tareas hechas")
+                } else {
+                    TaskList(
+                        tasks = filteredDoneTasks,
+                        showArchiveAsUnarchive = false,
+                        onToggleCompleted = onToggleCompleted,
+                        onChangePriority = onChangePriority,
+                        onToggleArchived = onToggleArchived,
+                        onArchiveWithUndo = onArchiveWithUndo,
+                        onDeleteTask = onDeleteTask,
+                        snackbarHostState = snackbarHostState,
+                        scope = scope,
+                        onEditTask = { task ->
+                            editingTask = task
+                            editTitle = task.title
+                            editTagsInput = task.tags.joinToString(",")
+                            editPriority = task.priority
+                            editDueDate = task.dueDate
+                        }
+                    )
+                }
             } else {
-                TaskList(
-                    tasks = filteredArchivedTasks,
-                    showArchiveAsUnarchive = true,
-                    onToggleCompleted = onToggleCompleted,
-                    onChangePriority = onChangePriority,
-                    onToggleArchived = onToggleArchived,
-                    onDeleteTask = onDeleteTask,
-                    snackbarHostState = snackbarHostState,
-                    scope = scope,
-                    onEditTask = { task ->
-                        editingTask = task
-                        editTitle = task.title
-                        editTagsInput = task.tags.joinToString(",")
-                        editPriority = task.priority
-                        editDueDate = task.dueDate
-                    }
-                )
+                if (filteredArchivedTasks.isEmpty()) {
+                    EmptyTabState(message = "No hay tareas archivadas")
+                } else {
+                    TaskList(
+                        tasks = filteredArchivedTasks,
+                        showArchiveAsUnarchive = true,
+                        onToggleCompleted = onToggleCompleted,
+                        onChangePriority = onChangePriority,
+                        onToggleArchived = onToggleArchived,
+                        onArchiveWithUndo = onArchiveWithUndo,
+                        onDeleteTask = onDeleteTask,
+                        snackbarHostState = snackbarHostState,
+                        scope = scope,
+                        onEditTask = { task ->
+                            editingTask = task
+                            editTitle = task.title
+                            editTagsInput = task.tags.joinToString(",")
+                            editPriority = task.priority
+                            editDueDate = task.dueDate
+                        }
+                    )
+                }
             }
         }
 
         FloatingActionButton(
-            onClick = {
-                createTitle = ""
-                createTagsInput = ""
-                createPriority = TaskPriority.MEDIO
-                createDueDate = null
-                showCreateSheet = true
-            },
+            onClick = openCreateSheet,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(16.dp)
@@ -300,14 +360,36 @@ fun TaskScreen(
                 onDueDateSelected = { createDueDate = it },
                 onClearDueDate = { createDueDate = null },
                 onCreate = {
-                    onAddTask(createTitle, createPriority, createDueDate, createTagsInput)
-                    showCreateSheet = false
-                    createTitle = ""
-                    createTagsInput = ""
-                    createPriority = TaskPriority.MEDIO
-                    createDueDate = null
+                    if (!hasSession) {
+                        scope.launch {
+                            snackbarHostState.showSnackbar("No hay sesion. Abre login.")
+                        }
+                    } else {
+                        onAddTask(
+                            createTitle,
+                            createPriority,
+                            createDueDate,
+                            createTagsInput
+                        ) { result ->
+                            result.onSuccess {
+                                showCreateSheet = false
+                                createTitle = ""
+                                createTagsInput = ""
+                                createPriority = TaskPriority.MEDIO
+                                createDueDate = null
+                            }.onFailure { error ->
+                                val message = error.message ?: "No se pudo crear la tarea"
+                                scope.launch {
+                                    snackbarHostState.showSnackbar(message)
+                                }
+                            }
+                        }
+                    }
                 },
-                onCancel = { showCreateSheet = false }
+                onCancel = { showCreateSheet = false },
+                hasSession = hasSession,
+                createError = createError,
+                isCreating = isCreating
             )
         }
     }
@@ -361,6 +443,29 @@ fun TaskScreen(
 }
 
 @Composable
+private fun EmptyTabState(
+    message: String,
+    buttonText: String? = null,
+    onButtonClick: (() -> Unit)? = null
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(message, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (buttonText != null && onButtonClick != null) {
+            Spacer(modifier = Modifier.height(12.dp))
+            Button(onClick = onButtonClick) {
+                Text(buttonText)
+            }
+        }
+    }
+}
+
+@Composable
 private fun NewTaskSheetContent(
     title: String,
     onTitleChange: (String) -> Unit,
@@ -372,7 +477,10 @@ private fun NewTaskSheetContent(
     onDueDateSelected: (Timestamp?) -> Unit,
     onClearDueDate: () -> Unit,
     onCreate: () -> Unit,
-    onCancel: () -> Unit
+    onCancel: () -> Unit,
+    hasSession: Boolean,
+    createError: String?,
+    isCreating: Boolean
 ) {
     val focusRequester = remember { FocusRequester() }
 
@@ -395,6 +503,7 @@ private fun NewTaskSheetContent(
                 .fillMaxWidth()
                 .focusRequester(focusRequester),
             singleLine = true,
+            enabled = !isCreating,
             label = { Text("Titulo") }
         )
 
@@ -406,13 +515,15 @@ private fun NewTaskSheetContent(
             PrioritySelector(
                 selected = selectedPriority,
                 onSelected = onPrioritySelected,
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f),
+                enabled = !isCreating
             )
             DueDateSelector(
                 selectedDueDate = selectedDueDate,
                 onDueDateSelected = onDueDateSelected,
                 onClearDueDate = onClearDueDate,
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f),
+                enabled = !isCreating
             )
         }
 
@@ -421,18 +532,30 @@ private fun NewTaskSheetContent(
             onValueChange = onTagsInputChange,
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
+            enabled = !isCreating,
             label = { Text("Tags (coma)") }
         )
+
+        if (!hasSession) {
+            Text("No hay sesion. Abre login.", color = MaterialTheme.colorScheme.error)
+        }
+        createError?.let {
+            Text(it, color = MaterialTheme.colorScheme.error)
+        }
 
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Button(onClick = onCancel, modifier = Modifier.weight(1f)) {
+            Button(onClick = onCancel, modifier = Modifier.weight(1f), enabled = !isCreating) {
                 Text("Cancelar")
             }
-            Button(onClick = onCreate, modifier = Modifier.weight(1f), enabled = title.isNotBlank()) {
-                Text("Crear")
+            Button(
+                onClick = onCreate,
+                modifier = Modifier.weight(1f),
+                enabled = title.isNotBlank() && hasSession && !isCreating
+            ) {
+                Text(if (isCreating) "Creando..." else "Crear")
             }
         }
     }
@@ -609,6 +732,7 @@ private fun TaskList(
     onToggleCompleted: (Task) -> Unit,
     onChangePriority: (Task, TaskPriority) -> Unit,
     onToggleArchived: (Task) -> Unit,
+    onArchiveWithUndo: (Task) -> Unit,
     onDeleteTask: (Task) -> Unit,
     snackbarHostState: SnackbarHostState,
     scope: kotlinx.coroutines.CoroutineScope,
@@ -659,19 +783,7 @@ private fun TaskList(
                     enableDismissFromStartToEnd = true,
                     enableDismissFromEndToStart = true,
                     onStartToEnd = { onToggleCompleted(task) },
-                    onEndToStart = {
-                        onToggleArchived(task)
-                        scope.launch {
-                            val result = snackbarHostState.showSnackbar(
-                                message = "Tarea archivada",
-                                actionLabel = "Deshacer",
-                                duration = SnackbarDuration.Short
-                            )
-                            if (result == SnackbarResult.ActionPerformed) {
-                                onToggleArchived(task)
-                            }
-                        }
-                    }
+                    onEndToStart = { onArchiveWithUndo(task) }
                 ) {
                     TaskRow(
                         task = task,
@@ -786,6 +898,8 @@ private fun TaskRow(
     onEditTask: () -> Unit
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
+    val priorityColor = task.priority.toIndicatorColor()
+    val indicatorColor = if (task.completed) priorityColor.copy(alpha = 0.35f) else priorityColor
 
     Row(
         modifier = Modifier
@@ -794,6 +908,14 @@ private fun TaskRow(
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        Box(
+            modifier = Modifier
+                .width(5.dp)
+                .height(22.dp)
+                .background(indicatorColor, RoundedCornerShape(3.dp))
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+
         Text(
             text = task.title,
             modifier = Modifier.weight(1f),
@@ -841,15 +963,26 @@ private fun TaskRow(
 }
 
 @Composable
+private fun TaskPriority.toIndicatorColor(): Color {
+    return when (this) {
+        TaskPriority.URGENTE -> MaterialTheme.colorScheme.error
+        TaskPriority.ALTO -> MaterialTheme.colorScheme.tertiary
+        TaskPriority.MEDIO -> MaterialTheme.colorScheme.primary
+        TaskPriority.BAJO -> MaterialTheme.colorScheme.secondary
+    }
+}
+
+@Composable
 private fun PrioritySelector(
     selected: TaskPriority,
     onSelected: (TaskPriority) -> Unit,
+    enabled: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     var expanded by remember { mutableStateOf(false) }
 
     Column(modifier = modifier) {
-        Button(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) {
+        Button(onClick = { expanded = true }, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
             Text("Prioridad: ${selected.value}")
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
@@ -871,6 +1004,7 @@ private fun DueDateSelector(
     selectedDueDate: Timestamp?,
     onDueDateSelected: (Timestamp?) -> Unit,
     onClearDueDate: () -> Unit,
+    enabled: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -895,13 +1029,14 @@ private fun DueDateSelector(
                     today.dayOfMonth
                 ).show()
             },
+            enabled = enabled,
             modifier = Modifier.weight(1f)
         ) {
             Text(formatDueDate(selectedDueDate))
         }
 
         if (selectedDueDate != null) {
-            Button(onClick = onClearDueDate) {
+            Button(onClick = onClearDueDate, enabled = enabled) {
                 Text("Quitar")
             }
         }

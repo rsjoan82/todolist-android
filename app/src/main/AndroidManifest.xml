@@ -29,22 +29,18 @@
 
         <receiver
             android:name=".widget.TodoListWidgetProvider"
-            android:exported="false">
+            android:exported="true"
+            android:label="TodoList">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-                <action android:name="com.todolist.app.widget.ACTION_REFRESH" />
-                <action android:name="com.todolist.app.widget.ACTION_TOGGLE_DONE" />
+                <action android:name="TODO_WIDGET_REFRESH" />
+                <action android:name="TODO_WIDGET_DONE" />
             </intent-filter>
 
             <meta-data
                 android:name="android.appwidget.provider"
-                android:resource="@xml/todo_list_widget_info" />
+                android:resource="@xml/todolist_widget_info" />
         </receiver>
-
-        <service
-            android:name=".widget.TodoListWidgetService"
-            android:exported="false"
-            android:permission="android.permission.BIND_REMOTEVIEWS" />
     </application>
 
 </manifest>

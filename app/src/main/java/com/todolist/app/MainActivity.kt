@@ -185,6 +185,7 @@ private fun AuthGate(
             taskUiState = taskUiState,
             modifier = modifier,
             onAddTask = taskViewModel::addTask,
+            onClearCreateError = taskViewModel::clearCreateError,
             onToggleCompleted = taskViewModel::toggleCompleted,
             onChangePriority = taskViewModel::changePriority,
             onToggleArchived = taskViewModel::toggleArchived,
@@ -234,7 +235,14 @@ private fun LoginScreen(
 @Composable
 private fun HomeScreen(
     taskUiState: TaskUiState,
-    onAddTask: (String, TaskPriority, Timestamp?, String) -> Unit,
+    onAddTask: (
+        String,
+        TaskPriority,
+        Timestamp?,
+        String,
+        (Result<Unit>) -> Unit
+    ) -> Unit,
+    onClearCreateError: () -> Unit,
     onToggleCompleted: (Task) -> Unit,
     onChangePriority: (Task, TaskPriority) -> Unit,
     onToggleArchived: (Task) -> Unit,
@@ -289,11 +297,15 @@ private fun HomeScreen(
             isLoading = taskUiState.isLoading,
             errorMessage = taskUiState.errorMessage,
             onAddTask = onAddTask,
+            isCreating = taskUiState.isCreating,
+            createError = taskUiState.createError,
+            onClearCreateError = onClearCreateError,
             onToggleCompleted = onToggleCompleted,
             onChangePriority = onChangePriority,
             onToggleArchived = onToggleArchived,
             onDeleteTask = onDeleteTask,
             onSaveTask = onSaveTask,
+            hasSession = taskUiState.user != null,
             openFilterRequest = openFilterRequest,
             openCreateRequest = openCreateRequest,
             modifier = Modifier.weight(1f)
