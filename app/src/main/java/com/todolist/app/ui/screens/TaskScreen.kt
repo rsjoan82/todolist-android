@@ -18,15 +18,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -38,6 +37,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -69,6 +70,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.graphics.Color
 import com.google.firebase.Timestamp
+import com.todolist.app.data.model.Tag
 import com.todolist.app.data.model.Task
 import com.todolist.app.data.model.TaskPriority
 import com.todolist.app.ui.TaskFilterPreferences
@@ -80,13 +82,13 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 private enum class TaskTab { OPEN, DONE, ARCHIVED }
-private enum class TagFilterMode { OR, AND }
 private const val TAG_LOG = "TodoListTags"
 private const val TAG_UNDO = "TodoListUndo"
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
 fun TaskScreen(
+    tags: List<Tag>,
     openTasks: List<Task>,
     doneTasks: List<Task>,
     archivedTasks: List<Task>,
@@ -96,7 +98,20 @@ fun TaskScreen(
         title: String,
         priority: TaskPriority,
         dueDate: Timestamp?,
-        tagsText: String,
+        tagId: String?,
+        onResult: (Result<Unit>) -> Unit
+    ) -> Unit,
+    onCreateTag: (
+        name: String,
+        onResult: (Result<Tag>) -> Unit
+    ) -> Unit,
+    onRenameTag: (
+        tag: Tag,
+        name: String,
+        onResult: (Result<Unit>) -> Unit
+    ) -> Unit,
+    onDeleteTag: (
+        tag: Tag,
         onResult: (Result<Unit>) -> Unit
     ) -> Unit,
     isCreating: Boolean,
@@ -106,7 +121,7 @@ fun TaskScreen(
     onChangePriority: (Task, TaskPriority) -> Unit,
     onToggleArchived: (Task) -> Unit,
     onDeleteTask: (Task) -> Unit,
-    onSaveTask: (task: Task, title: String, priority: TaskPriority, dueDate: Timestamp?, tagsText: String) -> Unit,
+    onSaveTask: (task: Task, title: String, priority: TaskPriority, dueDate: Timestamp?, tagId: String?) -> Unit,
     hasSession: Boolean,
     openFilterRequest: Int = 0,
     openCreateRequest: Int = 0,
@@ -116,21 +131,19 @@ fun TaskScreen(
 
     var showCreateSheet by remember { mutableStateOf(false) }
     var createTitle by remember { mutableStateOf("") }
-    var createTagsInput by remember { mutableStateOf("") }
+    var createSelectedTagId by remember { mutableStateOf<String?>(null) }
     var createPriority by remember { mutableStateOf(TaskPriority.MEDIO) }
     var createDueDate by remember { mutableStateOf<Timestamp?>(null) }
 
     var editingTask by remember { mutableStateOf<Task?>(null) }
     var editTitle by remember { mutableStateOf("") }
-    var editTagsInput by remember { mutableStateOf("") }
+    var editSelectedTagId by remember { mutableStateOf<String?>(null) }
     var editPriority by remember { mutableStateOf(TaskPriority.MEDIO) }
     var editDueDate by remember { mutableStateOf<Timestamp?>(null) }
-    var searchQuery by remember { mutableStateOf("") }
     var showTagFilterSheet by remember { mutableStateOf(false) }
     val context = LocalContext.current
-    var selectedTags by remember { mutableStateOf(TaskFilterPreferences.getSelectedTags(context)) }
-    var draftSelectedTags by remember { mutableStateOf(selectedTags) }
-    val tagFilterMode = TagFilterMode.OR
+    var selectedTag by remember { mutableStateOf(TaskFilterPreferences.getSelectedTag(context)) }
+    var draftSelectedTag by remember { mutableStateOf(selectedTag) }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     var lastArchivedTask by remember { mutableStateOf<Task?>(null) }
@@ -156,30 +169,27 @@ fun TaskScreen(
         }
     }
 
-    val availableTags = remember(openTasks, doneTasks, archivedTasks) {
-        (openTasks + doneTasks + archivedTasks)
-            .flatMap { it.tags }
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
-            .toSet()
-            .sortedBy { it.lowercase() }
+    val filteredOpenTasks = remember(openTasks, selectedTag) {
+        applyFilters(openTasks, selectedTag)
+    }
+    val filteredDoneTasks = remember(doneTasks, selectedTag) {
+        applyFilters(doneTasks, selectedTag)
+    }
+    val filteredArchivedTasks = remember(archivedTasks, selectedTag) {
+        applyFilters(archivedTasks, selectedTag)
     }
 
-    val normalizedQuery = searchQuery.trim()
-
-    val filteredOpenTasks = remember(openTasks, normalizedQuery, selectedTags, tagFilterMode) {
-        applyFilters(openTasks, normalizedQuery, selectedTags, tagFilterMode)
-    }
-    val filteredDoneTasks = remember(doneTasks, normalizedQuery, selectedTags, tagFilterMode) {
-        applyFilters(doneTasks, normalizedQuery, selectedTags, tagFilterMode)
-    }
-    val filteredArchivedTasks = remember(archivedTasks, normalizedQuery, selectedTags, tagFilterMode) {
-        applyFilters(archivedTasks, normalizedQuery, selectedTags, tagFilterMode)
+    LaunchedEffect(tags, selectedTag) {
+        if (selectedTag != null && tags.none { it.id == selectedTag }) {
+            selectedTag = null
+            draftSelectedTag = null
+            TaskFilterPreferences.saveSelectedTag(context, null)
+        }
     }
 
     LaunchedEffect(openFilterRequest) {
         if (openFilterRequest > 0) {
-            draftSelectedTags = selectedTags
+            draftSelectedTag = selectedTag
             showTagFilterSheet = true
         }
     }
@@ -187,7 +197,7 @@ fun TaskScreen(
     LaunchedEffect(openCreateRequest) {
         if (openCreateRequest > 0) {
             createTitle = ""
-            createTagsInput = ""
+            createSelectedTagId = null
             createPriority = TaskPriority.MEDIO
             createDueDate = null
             onClearCreateError()
@@ -197,7 +207,7 @@ fun TaskScreen(
 
     val openCreateSheet = {
         createTitle = ""
-        createTagsInput = ""
+        createSelectedTagId = null
         createPriority = TaskPriority.MEDIO
         createDueDate = null
         onClearCreateError()
@@ -206,17 +216,6 @@ fun TaskScreen(
 
     Box(modifier = modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                leadingIcon = {
-                    Icon(imageVector = Icons.Filled.Search, contentDescription = "Buscar")
-                },
-                label = { Text("Buscar tareas") }
-            )
-
             Spacer(modifier = Modifier.height(8.dp))
 
             val tabIndex = when (selectedTab) {
@@ -275,7 +274,7 @@ fun TaskScreen(
                         onEditTask = { task ->
                             editingTask = task
                             editTitle = task.title
-                            editTagsInput = task.tags.joinToString(",")
+                            editSelectedTagId = task.tagId
                             editPriority = task.priority
                             editDueDate = task.dueDate
                         }
@@ -298,7 +297,7 @@ fun TaskScreen(
                         onEditTask = { task ->
                             editingTask = task
                             editTitle = task.title
-                            editTagsInput = task.tags.joinToString(",")
+                            editSelectedTagId = task.tagId
                             editPriority = task.priority
                             editDueDate = task.dueDate
                         }
@@ -321,7 +320,7 @@ fun TaskScreen(
                         onEditTask = { task ->
                             editingTask = task
                             editTitle = task.title
-                            editTagsInput = task.tags.joinToString(",")
+                            editSelectedTagId = task.tagId
                             editPriority = task.priority
                             editDueDate = task.dueDate
                         }
@@ -350,10 +349,14 @@ fun TaskScreen(
     if (showCreateSheet) {
         ModalBottomSheet(onDismissRequest = { showCreateSheet = false }) {
             NewTaskSheetContent(
+                tags = tags,
                 title = createTitle,
                 onTitleChange = { createTitle = it },
-                tagsInput = createTagsInput,
-                onTagsInputChange = { createTagsInput = it },
+                selectedTagId = createSelectedTagId,
+                onSelectedTagIdChange = { createSelectedTagId = it },
+                onCreateTag = onCreateTag,
+                onRenameTag = onRenameTag,
+                onDeleteTag = onDeleteTag,
                 selectedPriority = createPriority,
                 onPrioritySelected = { createPriority = it },
                 selectedDueDate = createDueDate,
@@ -369,12 +372,12 @@ fun TaskScreen(
                             createTitle,
                             createPriority,
                             createDueDate,
-                            createTagsInput
+                            createSelectedTagId
                         ) { result ->
                             result.onSuccess {
                                 showCreateSheet = false
                                 createTitle = ""
-                                createTagsInput = ""
+                                createSelectedTagId = null
                                 createPriority = TaskPriority.MEDIO
                                 createDueDate = null
                             }.onFailure { error ->
@@ -397,19 +400,15 @@ fun TaskScreen(
     if (showTagFilterSheet) {
         ModalBottomSheet(onDismissRequest = { showTagFilterSheet = false }) {
             TagFilterSheet(
-                availableTags = availableTags,
-                selectedTags = draftSelectedTags,
-                onToggleTag = { tag ->
-                    draftSelectedTags = if (tag in draftSelectedTags) {
-                        draftSelectedTags - tag
-                    } else {
-                        draftSelectedTags + tag
-                    }
+                availableTags = tags,
+                selectedTag = draftSelectedTag,
+                onSelectTag = { tag ->
+                    draftSelectedTag = if (draftSelectedTag == tag) null else tag
                 },
-                onClear = { draftSelectedTags = emptySet() },
+                onClear = { draftSelectedTag = null },
                 onApply = {
-                    selectedTags = draftSelectedTags
-                    TaskFilterPreferences.saveSelectedTags(context, selectedTags)
+                    selectedTag = draftSelectedTag
+                    TaskFilterPreferences.saveSelectedTag(context, selectedTag)
                     showTagFilterSheet = false
                 }
             )
@@ -419,17 +418,21 @@ fun TaskScreen(
     editingTask?.let { task ->
         ModalBottomSheet(onDismissRequest = { editingTask = null }) {
             EditTaskSheetContent(
+                tags = tags,
                 title = editTitle,
                 onTitleChange = { editTitle = it },
-                tagsInput = editTagsInput,
-                onTagsInputChange = { editTagsInput = it },
+                selectedTagId = editSelectedTagId,
+                onSelectedTagIdChange = { editSelectedTagId = it },
+                onCreateTag = onCreateTag,
+                onRenameTag = onRenameTag,
+                onDeleteTag = onDeleteTag,
                 selectedPriority = editPriority,
                 onPrioritySelected = { editPriority = it },
                 selectedDueDate = editDueDate,
                 onDueDateSelected = { editDueDate = it },
                 onClearDueDate = { editDueDate = null },
                 onSave = {
-                    onSaveTask(task, editTitle, editPriority, editDueDate, editTagsInput)
+                    onSaveTask(task, editTitle, editPriority, editDueDate, editSelectedTagId)
                     editingTask = null
                 },
                 onCancel = { editingTask = null },
@@ -467,10 +470,14 @@ private fun EmptyTabState(
 
 @Composable
 private fun NewTaskSheetContent(
+    tags: List<Tag>,
     title: String,
     onTitleChange: (String) -> Unit,
-    tagsInput: String,
-    onTagsInputChange: (String) -> Unit,
+    selectedTagId: String?,
+    onSelectedTagIdChange: (String?) -> Unit,
+    onCreateTag: (String, (Result<Tag>) -> Unit) -> Unit,
+    onRenameTag: (Tag, String, (Result<Unit>) -> Unit) -> Unit,
+    onDeleteTag: (Tag, (Result<Unit>) -> Unit) -> Unit,
     selectedPriority: TaskPriority,
     onPrioritySelected: (TaskPriority) -> Unit,
     selectedDueDate: Timestamp?,
@@ -527,13 +534,14 @@ private fun NewTaskSheetContent(
             )
         }
 
-        OutlinedTextField(
-            value = tagsInput,
-            onValueChange = onTagsInputChange,
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            enabled = !isCreating,
-            label = { Text("Tags (coma)") }
+        TagSelector(
+            tags = tags,
+            selectedTagId = selectedTagId,
+            onSelectedTagIdChange = onSelectedTagIdChange,
+            onCreateTag = onCreateTag,
+            onRenameTag = onRenameTag,
+            onDeleteTag = onDeleteTag,
+            enabled = !isCreating
         )
 
         if (!hasSession) {
@@ -563,10 +571,14 @@ private fun NewTaskSheetContent(
 
 @Composable
 private fun EditTaskSheetContent(
+    tags: List<Tag>,
     title: String,
     onTitleChange: (String) -> Unit,
-    tagsInput: String,
-    onTagsInputChange: (String) -> Unit,
+    selectedTagId: String?,
+    onSelectedTagIdChange: (String?) -> Unit,
+    onCreateTag: (String, (Result<Tag>) -> Unit) -> Unit,
+    onRenameTag: (Tag, String, (Result<Unit>) -> Unit) -> Unit,
+    onDeleteTag: (Tag, (Result<Unit>) -> Unit) -> Unit,
     selectedPriority: TaskPriority,
     onPrioritySelected: (TaskPriority) -> Unit,
     selectedDueDate: Timestamp?,
@@ -608,12 +620,13 @@ private fun EditTaskSheetContent(
             )
         }
 
-        OutlinedTextField(
-            value = tagsInput,
-            onValueChange = onTagsInputChange,
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            label = { Text("Tags (coma)") }
+        TagSelector(
+            tags = tags,
+            selectedTagId = selectedTagId,
+            onSelectedTagIdChange = onSelectedTagIdChange,
+            onCreateTag = onCreateTag,
+            onRenameTag = onRenameTag,
+            onDeleteTag = onDeleteTag
         )
 
         Row(
@@ -636,38 +649,22 @@ private fun EditTaskSheetContent(
 
 private fun applyFilters(
     tasks: List<Task>,
-    searchQuery: String,
-    selectedTags: Set<String>,
-    mode: TagFilterMode
+    selectedTag: String?
 ): List<Task> {
     var filtered = tasks
-    val normalizedSelectedTags = selectedTags
-        .map { it.trim().lowercase() }
-        .filter { it.isNotEmpty() }
-        .toSet()
+    val normalizedSelectedTag = selectedTag?.trim()?.takeIf { it.isNotEmpty() }
 
-    if (searchQuery.isNotEmpty()) {
-        filtered = filtered.filter { it.title.contains(searchQuery, ignoreCase = true) }
-    }
-
-    val beforeTagsCount = filtered.size
-    if (normalizedSelectedTags.isNotEmpty()) {
-        filtered = when (mode) {
-            TagFilterMode.OR -> filtered.filter { task ->
-                task.tags.any { it.trim().lowercase() in normalizedSelectedTags }
-            }
-            TagFilterMode.AND -> filtered.filter { task ->
-                normalizedSelectedTags.all { selected ->
-                    task.tags.any { it.trim().lowercase() == selected }
-                }
-            }
+    val beforeTagCount = filtered.size
+    if (normalizedSelectedTag != null) {
+        filtered = filtered.filter { task ->
+            task.tagId?.trim() == normalizedSelectedTag
         }
     }
-    val afterTagsCount = filtered.size
+    val afterTagCount = filtered.size
 
     Log.d(
         TAG_LOG,
-        "applyFilters selectedTags=$normalizedSelectedTags beforeTags=$beforeTagsCount afterTags=$afterTagsCount mode=$mode search='$searchQuery'"
+        "applyFilters selectedTag=$normalizedSelectedTag beforeTag=$beforeTagCount afterTag=$afterTagCount"
     )
 
     return filtered
@@ -675,37 +672,69 @@ private fun applyFilters(
 
 @Composable
 private fun TagFilterSheet(
-    availableTags: List<String>,
-    selectedTags: Set<String>,
-    onToggleTag: (String) -> Unit,
+    availableTags: List<Tag>,
+    selectedTag: String?,
+    onSelectTag: (String) -> Unit,
     onClear: () -> Unit,
     onApply: () -> Unit
 ) {
+    val tagColumns = remember(availableTags) {
+        val items = listOf<Tag?>(null) + availableTags
+        items.chunked(4)
+    }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Text("Filtrar por tags", style = MaterialTheme.typography.titleMedium)
+        Text("Filtrar por tag", style = MaterialTheme.typography.titleMedium)
 
         if (availableTags.isEmpty()) {
             Text("No hay tags disponibles")
         } else {
-            LazyColumn(modifier = Modifier.height(220.dp)) {
-                items(availableTags, key = { it }) { tag ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onToggleTag(tag) }
-                            .padding(vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
+            LazyRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(240.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                items(tagColumns, key = { column ->
+                    column.joinToString("|") { it?.id ?: "all" }
+                }) { column ->
+                    Column(
+                        modifier = Modifier.width(180.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        Checkbox(
-                            checked = tag in selectedTags,
-                            onCheckedChange = { onToggleTag(tag) }
-                        )
-                        Text(tag)
+                        column.forEach { tag ->
+                            val tagId = tag?.id
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        if (tagId == null) {
+                                            onClear()
+                                        } else {
+                                            onSelectTag(tagId)
+                                        }
+                                    }
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                RadioButton(
+                                    selected = if (tagId == null) selectedTag == null else tagId == selectedTag,
+                                    onClick = {
+                                        if (tagId == null) {
+                                            onClear()
+                                        } else {
+                                            onSelectTag(tagId)
+                                        }
+                                    }
+                                )
+                                Text(tag?.name ?: "Todos")
+                            }
+                        }
                     }
                 }
             }
@@ -720,6 +749,320 @@ private fun TagFilterSheet(
             }
             Button(onClick = onApply, modifier = Modifier.weight(1f)) {
                 Text("Aplicar")
+            }
+        }
+    }
+}
+
+@Composable
+@OptIn(ExperimentalMaterial3Api::class)
+private fun TagSelector(
+    tags: List<Tag>,
+    selectedTagId: String?,
+    onSelectedTagIdChange: (String?) -> Unit,
+    onCreateTag: (String, (Result<Tag>) -> Unit) -> Unit,
+    onRenameTag: (Tag, String, (Result<Unit>) -> Unit) -> Unit,
+    onDeleteTag: (Tag, (Result<Unit>) -> Unit) -> Unit,
+    enabled: Boolean = true
+) {
+    var expanded by remember { mutableStateOf(false) }
+    var showCreateTagSheet by remember { mutableStateOf(false) }
+    var showManageTagsSheet by remember { mutableStateOf(false) }
+    var renameTargetTag by remember { mutableStateOf<Tag?>(null) }
+    var deleteTargetTag by remember { mutableStateOf<Tag?>(null) }
+    var newTagName by remember { mutableStateOf("") }
+    var renameTagName by remember { mutableStateOf("") }
+    var tagActionError by remember { mutableStateOf<String?>(null) }
+    var isSubmittingTagAction by remember { mutableStateOf(false) }
+    val selectedLabel = when {
+        selectedTagId == null -> "Sin tag"
+        else -> tags.firstOrNull { it.id == selectedTagId }?.name ?: "Tag no disponible"
+    }
+
+    Column {
+        Button(
+            onClick = { expanded = true },
+            enabled = enabled,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Tag: $selectedLabel")
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenuItem(
+                text = { Text("Sin tag") },
+                onClick = {
+                    onSelectedTagIdChange(null)
+                    expanded = false
+                }
+            )
+            DropdownMenuItem(
+                text = { Text("Nuevo tag") },
+                onClick = {
+                    expanded = false
+                    newTagName = ""
+                    tagActionError = null
+                    showCreateTagSheet = true
+                }
+            )
+            if (tags.isNotEmpty()) {
+                DropdownMenuItem(
+                    text = { Text("Gestionar tags") },
+                    onClick = {
+                        expanded = false
+                        tagActionError = null
+                        showManageTagsSheet = true
+                    }
+                )
+            }
+            if (tags.isEmpty()) {
+                DropdownMenuItem(
+                    text = { Text("No hay tags") },
+                    onClick = { expanded = false }
+                )
+            } else {
+                tags.forEach { tag ->
+                    DropdownMenuItem(
+                        text = { Text(tag.name) },
+                        onClick = {
+                            onSelectedTagIdChange(tag.id)
+                            expanded = false
+                        }
+                    )
+                }
+            }
+        }
+    }
+
+    if (showCreateTagSheet) {
+        ModalBottomSheet(onDismissRequest = { showCreateTagSheet = false }) {
+            TagNameSheet(
+                title = "Nuevo tag",
+                actionLabel = if (isSubmittingTagAction) "Creando..." else "Crear",
+                value = newTagName,
+                onValueChange = {
+                    newTagName = it
+                    tagActionError = null
+                },
+                errorMessage = tagActionError,
+                isSubmitting = isSubmittingTagAction,
+                onCancel = { showCreateTagSheet = false },
+                onConfirm = {
+                    val candidate = newTagName.trim()
+                    if (candidate.isEmpty()) {
+                        tagActionError = "El nombre del tag es obligatorio"
+                    } else {
+                        isSubmittingTagAction = true
+                        onCreateTag(candidate) { result ->
+                            isSubmittingTagAction = false
+                            result.onSuccess { tag ->
+                                onSelectedTagIdChange(tag.id)
+                                showCreateTagSheet = false
+                            }.onFailure { error ->
+                                tagActionError = error.message ?: "No se pudo crear el tag"
+                            }
+                        }
+                    }
+                }
+            )
+        }
+    }
+
+    if (showManageTagsSheet) {
+        ModalBottomSheet(onDismissRequest = { showManageTagsSheet = false }) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text("Gestionar tags", style = MaterialTheme.typography.titleMedium)
+
+                if (tags.isEmpty()) {
+                    Text("No hay tags")
+                } else {
+                    tags.forEach { tag ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = tag.name,
+                                modifier = Modifier.weight(1f),
+                                style = MaterialTheme.typography.bodyLarge
+                            )
+                            OutlinedButton(
+                                onClick = {
+                                    renameTargetTag = tag
+                                    renameTagName = tag.name
+                                    tagActionError = null
+                                },
+                                enabled = !isSubmittingTagAction
+                            ) {
+                                Text("Renombrar")
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    deleteTargetTag = tag
+                                    tagActionError = null
+                                },
+                                enabled = !isSubmittingTagAction
+                            ) {
+                                Text("Borrar")
+                            }
+                        }
+                    }
+                }
+
+                tagActionError?.let {
+                    Text(it, color = MaterialTheme.colorScheme.error)
+                }
+
+                Button(
+                    onClick = { showManageTagsSheet = false },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !isSubmittingTagAction
+                ) {
+                    Text("Cerrar")
+                }
+            }
+        }
+    }
+
+    renameTargetTag?.let { tag ->
+        ModalBottomSheet(onDismissRequest = { if (!isSubmittingTagAction) renameTargetTag = null }) {
+            TagNameSheet(
+                title = "Renombrar tag",
+                actionLabel = if (isSubmittingTagAction) "Guardando..." else "Guardar",
+                value = renameTagName,
+                onValueChange = {
+                    renameTagName = it
+                    tagActionError = null
+                },
+                errorMessage = tagActionError,
+                isSubmitting = isSubmittingTagAction,
+                onCancel = { renameTargetTag = null },
+                onConfirm = {
+                    val candidate = renameTagName.trim()
+                    if (candidate.isEmpty()) {
+                        tagActionError = "El nombre del tag es obligatorio"
+                    } else {
+                        isSubmittingTagAction = true
+                        onRenameTag(tag, candidate) { result ->
+                            isSubmittingTagAction = false
+                            result.onSuccess {
+                                renameTargetTag = null
+                            }.onFailure { error ->
+                                tagActionError = error.message ?: "No se pudo renombrar el tag"
+                            }
+                        }
+                    }
+                }
+            )
+        }
+    }
+
+    deleteTargetTag?.let { tag ->
+        ModalBottomSheet(onDismissRequest = { if (!isSubmittingTagAction) deleteTargetTag = null }) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text("Borrar tag", style = MaterialTheme.typography.titleMedium)
+                Text("Las tareas que usen \"${tag.name}\" quedaran sin tag.")
+
+                tagActionError?.let {
+                    Text(it, color = MaterialTheme.colorScheme.error)
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = { deleteTargetTag = null },
+                        modifier = Modifier.weight(1f),
+                        enabled = !isSubmittingTagAction
+                    ) {
+                        Text("Cancelar")
+                    }
+                    Button(
+                        onClick = {
+                            isSubmittingTagAction = true
+                            onDeleteTag(tag) { result ->
+                                isSubmittingTagAction = false
+                                result.onSuccess {
+                                    if (selectedTagId == tag.id) {
+                                        onSelectedTagIdChange(null)
+                                    }
+                                    deleteTargetTag = null
+                                }.onFailure { error ->
+                                    tagActionError = error.message ?: "No se pudo borrar el tag"
+                                }
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                        enabled = !isSubmittingTagAction
+                    ) {
+                        Text(if (isSubmittingTagAction) "Borrando..." else "Borrar")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TagNameSheet(
+    title: String,
+    actionLabel: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    errorMessage: String?,
+    isSubmitting: Boolean,
+    onCancel: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Text(title, style = MaterialTheme.typography.titleMedium)
+
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            enabled = !isSubmitting,
+            label = { Text("Nombre") }
+        )
+
+        errorMessage?.let {
+            Text(it, color = MaterialTheme.colorScheme.error)
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            OutlinedButton(
+                onClick = onCancel,
+                modifier = Modifier.weight(1f),
+                enabled = !isSubmitting
+            ) {
+                Text("Cancelar")
+            }
+            Button(
+                onClick = onConfirm,
+                modifier = Modifier.weight(1f),
+                enabled = !isSubmitting
+            ) {
+                Text(actionLabel)
             }
         }
     }

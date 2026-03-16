@@ -7,10 +7,12 @@ import com.google.firebase.Timestamp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.firestore.FirebaseFirestoreException
+import com.todolist.app.data.model.Tag
 import com.todolist.app.data.model.Task
 import com.todolist.app.data.model.TaskPatch
 import com.todolist.app.data.model.TaskPriority
 import com.todolist.app.data.model.TaskStatus
+import com.todolist.app.data.repository.TagRepository
 import com.todolist.app.data.repository.TaskRepository
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.TimeoutCancellationException
@@ -22,9 +24,11 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import java.net.UnknownHostException
+import java.util.Locale
 
 data class TaskUiState(
     val user: FirebaseUser? = null,
+    val tags: List<Tag> = emptyList(),
     val openTasks: List<Task> = emptyList(),
     val doneTasks: List<Task> = emptyList(),
     val archivedTasks: List<Task> = emptyList(),
@@ -36,6 +40,7 @@ data class TaskUiState(
 
 class TaskViewModel(
     private val auth: FirebaseAuth = FirebaseAuth.getInstance(),
+    private val tagRepository: TagRepository = TagRepository(),
     private val repository: TaskRepository = TaskRepository()
 ) : ViewModel() {
     companion object {
@@ -48,6 +53,7 @@ class TaskViewModel(
     private var openTasksJob: Job? = null
     private var doneTasksJob: Job? = null
     private var archivedTasksJob: Job? = null
+    private var tagsJob: Job? = null
 
     private val authStateListener = FirebaseAuth.AuthStateListener { firebaseAuth ->
         val user = firebaseAuth.currentUser
@@ -58,16 +64,21 @@ class TaskViewModel(
         if (user == null) {
             clearTasks()
         } else {
+            observeTags(user.uid)
             observeTasks(user.uid)
         }
     }
 
     init {
         auth.addAuthStateListener(authStateListener)
-        auth.currentUser?.uid?.let { observeTasks(it) }
+        auth.currentUser?.uid?.let {
+            observeTags(it)
+            observeTasks(it)
+        }
     }
 
     override fun onCleared() {
+        tagsJob?.cancel()
         openTasksJob?.cancel()
         doneTasksJob?.cancel()
         archivedTasksJob?.cancel()
@@ -79,7 +90,7 @@ class TaskViewModel(
         title: String,
         priority: TaskPriority,
         dueDate: Timestamp?,
-        tagsText: String,
+        tagId: String?,
         onResult: (Result<Unit>) -> Unit = {}
     ) {
         val uid = _uiState.value.user?.uid
@@ -111,18 +122,13 @@ class TaskViewModel(
             return
         }
 
-        val tags = tagsText
-            .split(",")
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
-
         _uiState.update { it.copy(isCreating = true, createError = null) }
         Log.d(LOG_TAG, "create start uid=$uid title=${title.trim()}")
 
         viewModelScope.launch {
             val result = try {
                 withTimeout(10_000L) {
-                    repository.addTask(uid, title, priority, dueDate, tags)
+                    repository.addTask(uid, title, priority, dueDate, tagId.normalizeSelectedTagId())
                 }
                 Log.d(LOG_TAG, "create success users/$uid/tasks")
                 _uiState.update {
@@ -148,6 +154,122 @@ class TaskViewModel(
 
     fun clearCreateError() {
         _uiState.update { it.copy(createError = null) }
+    }
+
+    fun createTag(
+        name: String,
+        onResult: (Result<Tag>) -> Unit = {}
+    ) {
+        val uid = _uiState.value.user?.uid
+        if (uid == null) {
+            onResult(Result.failure(IllegalStateException("No hay sesion")))
+            return
+        }
+
+        val cleanName = name.trim()
+        if (cleanName.isEmpty()) {
+            onResult(Result.failure(IllegalArgumentException("El nombre del tag es obligatorio")))
+            return
+        }
+
+        val normalizedName = normalizeTagName(cleanName)
+        val duplicatedTag = _uiState.value.tags.firstOrNull { tag ->
+            normalizeTagName(tag.name) == normalizedName
+        }
+        if (duplicatedTag != null) {
+            onResult(Result.failure(IllegalArgumentException("Ya existe un tag con ese nombre")))
+            return
+        }
+
+        viewModelScope.launch {
+            val result = runCatching {
+                withTimeout(10_000L) {
+                    tagRepository.createTag(uid, cleanName)
+                }
+            }.onFailure { error ->
+                _uiState.update {
+                    it.copy(errorMessage = mapCreateErrorMessage(error))
+                }
+            }
+
+            onResult(result)
+        }
+    }
+
+    fun renameTag(
+        tag: Tag,
+        name: String,
+        onResult: (Result<Unit>) -> Unit = {}
+    ) {
+        val uid = _uiState.value.user?.uid
+        if (uid == null) {
+            onResult(Result.failure(IllegalStateException("No hay sesion")))
+            return
+        }
+
+        if (tag.id.isBlank()) {
+            onResult(Result.failure(IllegalArgumentException("Tag invalido")))
+            return
+        }
+
+        val cleanName = name.trim()
+        if (cleanName.isEmpty()) {
+            onResult(Result.failure(IllegalArgumentException("El nombre del tag es obligatorio")))
+            return
+        }
+
+        val normalizedName = normalizeTagName(cleanName)
+        val duplicatedTag = _uiState.value.tags.firstOrNull { currentTag ->
+            currentTag.id != tag.id && normalizeTagName(currentTag.name) == normalizedName
+        }
+        if (duplicatedTag != null) {
+            onResult(Result.failure(IllegalArgumentException("Ya existe un tag con ese nombre")))
+            return
+        }
+
+        viewModelScope.launch {
+            val result = runCatching {
+                withTimeout(10_000L) {
+                    tagRepository.renameTag(uid, tag.id, cleanName)
+                }
+            }.onFailure { error ->
+                _uiState.update {
+                    it.copy(errorMessage = mapCreateErrorMessage(error))
+                }
+            }
+
+            onResult(result)
+        }
+    }
+
+    fun deleteTag(
+        tag: Tag,
+        onResult: (Result<Unit>) -> Unit = {}
+    ) {
+        val uid = _uiState.value.user?.uid
+        if (uid == null) {
+            onResult(Result.failure(IllegalStateException("No hay sesion")))
+            return
+        }
+
+        if (tag.id.isBlank()) {
+            onResult(Result.failure(IllegalArgumentException("Tag invalido")))
+            return
+        }
+
+        viewModelScope.launch {
+            val result = runCatching {
+                withTimeout(10_000L) {
+                    tagRepository.deleteTag(uid, tag.id)
+                }
+            }.onFailure { error ->
+                _uiState.update {
+                    it.copy(errorMessage = mapCreateErrorMessage(error))
+                }
+            }
+
+            onResult(result)
+        }
     }
 
     private fun mapCreateErrorMessage(error: Throwable): String {
@@ -199,21 +321,18 @@ class TaskViewModel(
         title: String,
         priority: TaskPriority,
         dueDate: Timestamp?,
-        tagsText: String
+        tagId: String?
     ) {
         val cleanTitle = title.trim()
-        val cleanTags = tagsText
-            .split(",")
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
-            .distinct()
+        val cleanTagId = tagId.normalizeSelectedTagId(allowCurrent = task.tagId)
+        val currentTag = task.tagId
 
         val titleChanged = cleanTitle.isNotBlank() && cleanTitle != task.title
         val priorityChanged = priority != task.priority
         val dueDateChanged = !sameTimestamp(dueDate, task.dueDate)
-        val tagsChanged = cleanTags != task.tags
+        val tagChanged = cleanTagId != currentTag
 
-        if (!titleChanged && !priorityChanged && !dueDateChanged && !tagsChanged) return
+        if (!titleChanged && !priorityChanged && !dueDateChanged && !tagChanged) return
 
         updateTask(
             task.id,
@@ -222,7 +341,8 @@ class TaskViewModel(
                 priority = if (priorityChanged) priority else null,
                 dueDate = dueDate,
                 setDueDate = dueDateChanged,
-                tags = if (tagsChanged) cleanTags else null
+                tagId = cleanTagId,
+                setTagId = tagChanged
             )
         )
     }
@@ -264,16 +384,34 @@ class TaskViewModel(
     }
 
     private fun clearTasks() {
+        tagsJob?.cancel()
         openTasksJob?.cancel()
         doneTasksJob?.cancel()
         archivedTasksJob?.cancel()
         _uiState.update {
             it.copy(
+                tags = emptyList(),
                 openTasks = emptyList(),
                 doneTasks = emptyList(),
                 archivedTasks = emptyList(),
                 isLoading = false
             )
+        }
+    }
+
+    private fun observeTags(uid: String) {
+        tagsJob?.cancel()
+
+        tagsJob = viewModelScope.launch {
+            tagRepository.getTags(uid)
+                .catch { error ->
+                    _uiState.update {
+                        it.copy(errorMessage = error.message ?: "No se pudieron cargar los tags")
+                    }
+                }
+                .collect { tags ->
+                    _uiState.update { it.copy(tags = tags) }
+                }
         }
     }
 
@@ -328,5 +466,21 @@ class TaskViewModel(
                     _uiState.update { it.copy(archivedTasks = tasks, isLoading = false) }
                 }
         }
+    }
+
+    private fun String?.normalizeSelectedTagId(allowCurrent: String? = null): String? {
+        val candidate = this?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        return if (
+            _uiState.value.tags.any { it.id == candidate } ||
+            (allowCurrent != null && allowCurrent == candidate)
+        ) {
+            candidate
+        } else {
+            null
+        }
+    }
+
+    private fun normalizeTagName(value: String): String {
+        return value.trim().lowercase(Locale.ROOT)
     }
 }

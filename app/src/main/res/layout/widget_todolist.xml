@@ -39,6 +39,18 @@
             android:src="@android:drawable/ic_input_add" />
     </LinearLayout>
 
+    <TextView
+        android:id="@+id/widgetClearDoneButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:clickable="true"
+        android:focusable="true"
+        android:text="Archivar hechas"
+        android:textColor="@android:color/holo_blue_dark"
+        android:textSize="13sp"
+        android:textStyle="bold" />
+
     <ListView
         android:id="@+id/widgetTaskList"
         android:layout_width="match_parent"

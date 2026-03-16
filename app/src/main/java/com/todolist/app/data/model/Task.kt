@@ -35,13 +35,15 @@ data class Task(
     val archived: Boolean = false,
     val priority: TaskPriority = TaskPriority.MEDIO,
     val dueDate: Timestamp? = null,
-    val tags: List<String> = emptyList(),
+    val tagId: String? = null,
+    val doneAt: Timestamp? = null,
     val createdAt: Timestamp? = null
 )
 
 data class TaskPatch(
     val title: String? = null,
-    val tags: List<String>? = null,
+    val tagId: String? = null,
+    val setTagId: Boolean = false,
     val priority: TaskPriority? = null,
     val dueDate: Timestamp? = null,
     val setDueDate: Boolean = false,

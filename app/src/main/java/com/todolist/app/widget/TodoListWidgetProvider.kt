@@ -6,14 +6,15 @@ import android.appwidget.AppWidgetProvider
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.util.Log
 import android.widget.RemoteViews
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.todolist.app.MainActivity
 import com.todolist.app.R
 import com.todolist.app.data.repository.TaskRepository
-import com.todolist.app.ui.TaskFilterPreferences
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -25,27 +26,15 @@ class TodoListWidgetProvider : AppWidgetProvider() {
     companion object {
         const val ACTION_REFRESH = "TODO_WIDGET_REFRESH"
         const val ACTION_TOGGLE_DONE = "TODO_WIDGET_DONE"
+        const val ACTION_CLEAR_DONE = "TODO_WIDGET_CLEAR_DONE"
         const val EXTRA_TASK_ID = "extra_task_id"
+        const val EXTRA_MARK_DONE = "extra_mark_done"
+        const val EXTRA_APP_WIDGET_ID = "extra_app_widget_id"
         private const val LOG_TAG = "TodoListWidget"
         private const val REQUEST_REFRESH = 1001
         private const val REQUEST_ADD = 1002
+        private const val REQUEST_CLEAR_DONE = 1003
         private val widgetScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
-        private data class WidgetLine(
-            val title: String,
-            val taskId: String? = null
-        )
-
-        private fun buildRemoteViews(context: Context, lines: List<WidgetLine>): RemoteViews {
-            val views = RemoteViews(context.packageName, R.layout.todolist_widget)
-            views.setTextViewText(R.id.title, "TodoList")
-            views.setTextViewText(R.id.task1, lines.getOrElse(0) { WidgetLine("") }.title)
-            views.setTextViewText(R.id.task2, lines.getOrElse(1) { WidgetLine("") }.title)
-            views.setTextViewText(R.id.task3, lines.getOrElse(2) { WidgetLine("") }.title)
-            views.setTextViewText(R.id.task4, lines.getOrElse(3) { WidgetLine("") }.title)
-            views.setTextViewText(R.id.task5, lines.getOrElse(4) { WidgetLine("") }.title)
-            return views
-        }
     }
 
     private val repository = TaskRepository()
@@ -74,6 +63,7 @@ class TodoListWidgetProvider : AppWidgetProvider() {
             ACTION_TOGGLE_DONE -> {
                 val uid = FirebaseAuth.getInstance().currentUser?.uid.orEmpty()
                 val taskId = intent.getStringExtra(EXTRA_TASK_ID).orEmpty()
+                val markDone = intent.getBooleanExtra(EXTRA_MARK_DONE, true)
                 if (uid.isBlank() || taskId.isBlank()) return
 
                 val pendingResult = goAsync()
@@ -86,13 +76,31 @@ class TodoListWidgetProvider : AppWidgetProvider() {
                             .document(taskId)
                             .update(
                                 mapOf(
-                                    "status" to "done",
-                                    "completed" to true
+                                    "status" to if (markDone) "done" else "open",
+                                    "boardColumn" to if (markDone) "done" else "backlog",
+                                    "completed" to markDone,
+                                    "doneAt" to if (markDone) FieldValue.serverTimestamp() else null,
+                                    "updatedAt" to FieldValue.serverTimestamp()
                                 )
                             )
                             .await()
                     }.onFailure { error ->
-                        Log.e(LOG_TAG, "Error updating task as done from widget. uid=$uid taskId=$taskId", error)
+                        Log.e(LOG_TAG, "Error toggling task from widget. uid=$uid taskId=$taskId markDone=$markDone", error)
+                    }
+                    refreshAllWidgets(context)
+                    pendingResult.finish()
+                }
+            }
+            ACTION_CLEAR_DONE -> {
+                val uid = FirebaseAuth.getInstance().currentUser?.uid.orEmpty()
+                if (uid.isBlank()) return
+
+                val pendingResult = goAsync()
+                widgetScope.launch {
+                    runCatching {
+                        repository.archiveVisibleDoneTasksForWidget(uid)
+                    }.onFailure { error ->
+                        Log.e(LOG_TAG, "Error clearing done tasks from widget. uid=$uid", error)
                     }
                     refreshAllWidgets(context)
                     pendingResult.finish()
@@ -103,32 +111,20 @@ class TodoListWidgetProvider : AppWidgetProvider() {
 
     private suspend fun updateAppWidget(context: Context, manager: AppWidgetManager, appWidgetId: Int) {
         val user = FirebaseAuth.getInstance().currentUser
-        val hasUser = user != null
-        val lines = when {
-            user == null -> listOf(WidgetLine("Abre la app para iniciar sesion"))
-            else -> {
-                val selectedTags = TaskFilterPreferences.getSelectedTags(context)
-                val fetchResult = runCatching {
-                    repository.getOpenTasksForWidget(user.uid, selectedTags, maxItems = 5)
-                }
-                fetchResult.fold(
-                    onSuccess = { tasks ->
-                        if (tasks.isEmpty()) {
-                            listOf(WidgetLine("No hay tareas abiertas"))
-                        } else {
-                            tasks.map { WidgetLine(title = it.title, taskId = it.id) }
-                        }
-                    },
-                    onFailure = { error ->
-                        Log.e(LOG_TAG, "Error loading widget tasks", error)
-                        listOf(WidgetLine("Sin conexion"))
-                    }
-                )
-            }
-        }
+        val views = RemoteViews(context.packageName, R.layout.widget_todolist)
+        views.setTextViewText(R.id.widgetTitle, "TodoList")
+        views.setTextViewText(
+            R.id.widgetEmpty,
+            if (user == null) "Abre la app para iniciar sesion" else "No hay tareas"
+        )
+        views.setEmptyView(R.id.widgetTaskList, R.id.widgetEmpty)
 
-        val normalizedLines = lines + List((5 - lines.size).coerceAtLeast(0)) { WidgetLine("") }
-        val views = buildRemoteViews(context, normalizedLines)
+        val serviceIntent = Intent(context, TodoListWidgetService::class.java).apply {
+            putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
+            putExtra(EXTRA_APP_WIDGET_ID, appWidgetId)
+            data = Uri.parse(toUri(Intent.URI_INTENT_SCHEME))
+        }
+        views.setRemoteAdapter(R.id.widgetTaskList, serviceIntent)
 
         val refreshIntent = Intent(context, TodoListWidgetProvider::class.java).apply {
             action = ACTION_REFRESH
@@ -140,7 +136,7 @@ class TodoListWidgetProvider : AppWidgetProvider() {
             refreshIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        views.setOnClickPendingIntent(R.id.btnRefresh, refreshPendingIntent)
+        views.setOnClickPendingIntent(R.id.widgetRefreshButton, refreshPendingIntent)
 
         val addIntent = Intent(context, MainActivity::class.java).apply {
             putExtra(MainActivity.EXTRA_OPEN_CREATE_TASK, true)
@@ -152,36 +148,41 @@ class TodoListWidgetProvider : AppWidgetProvider() {
             addIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        views.setOnClickPendingIntent(R.id.btnAdd, addPendingIntent)
+        views.setOnClickPendingIntent(R.id.widgetAddButton, addPendingIntent)
 
-        val taskViewIds = listOf(R.id.task1, R.id.task2, R.id.task3, R.id.task4, R.id.task5)
-        taskViewIds.forEachIndexed { index, viewId ->
-            val taskId = normalizedLines.getOrNull(index)?.taskId
-            val canClick = hasUser && !taskId.isNullOrBlank()
-            val taskPendingIntent = if (canClick) {
-                val taskIntent = Intent(context, TodoListWidgetProvider::class.java).apply {
-                    action = ACTION_TOGGLE_DONE
-                    putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
-                    putExtra(EXTRA_TASK_ID, taskId)
-                }
-                PendingIntent.getBroadcast(
-                    context,
-                    appWidgetId * 10 + index,
-                    taskIntent,
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                )
-            } else null
-            views.setBoolean(viewId, "setEnabled", canClick)
-            views.setOnClickPendingIntent(viewId, taskPendingIntent)
+        val clearDoneIntent = Intent(context, TodoListWidgetProvider::class.java).apply {
+            action = ACTION_CLEAR_DONE
+            putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
         }
+        val clearDonePendingIntent = PendingIntent.getBroadcast(
+            context,
+            REQUEST_CLEAR_DONE + appWidgetId,
+            clearDoneIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        views.setOnClickPendingIntent(R.id.widgetClearDoneButton, clearDonePendingIntent)
+
+        val toggleIntentTemplate = Intent(context, TodoListWidgetProvider::class.java).apply {
+            action = ACTION_TOGGLE_DONE
+            putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
+        }
+        val togglePendingIntentTemplate = PendingIntent.getBroadcast(
+            context,
+            appWidgetId,
+            toggleIntentTemplate,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        views.setPendingIntentTemplate(R.id.widgetTaskList, togglePendingIntentTemplate)
 
         manager.updateAppWidget(appWidgetId, views)
+        manager.notifyAppWidgetViewDataChanged(appWidgetId, R.id.widgetTaskList)
     }
 
     private suspend fun refreshAllWidgets(context: Context) {
         val manager = AppWidgetManager.getInstance(context)
         val ids = manager.getAppWidgetIds(ComponentName(context, TodoListWidgetProvider::class.java))
         if (ids.isNotEmpty()) {
+            manager.notifyAppWidgetViewDataChanged(ids, R.id.widgetTaskList)
             ids.forEach { appWidgetId ->
                 updateAppWidget(context, manager, appWidgetId)
             }
