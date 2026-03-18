@@ -16,6 +16,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
@@ -33,7 +35,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -216,7 +217,7 @@ fun TaskScreen(
 
     Box(modifier = modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(4.dp))
 
             val tabIndex = when (selectedTab) {
                 TaskTab.OPEN -> 0
@@ -241,16 +242,16 @@ fun TaskScreen(
                 )
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(4.dp))
 
             if (isLoading) {
                 CircularProgressIndicator()
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(4.dp))
             }
 
             errorMessage?.let {
                 Text(text = it, color = MaterialTheme.colorScheme.error)
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(4.dp))
             }
 
             if (selectedTab == TaskTab.OPEN) {
@@ -1086,7 +1087,7 @@ private fun TaskList(
         return
     }
 
-    LazyColumn(contentPadding = PaddingValues(bottom = 96.dp)) {
+    LazyColumn(contentPadding = PaddingValues(bottom = 84.dp)) {
         items(tasks, key = { it.id }) { task ->
             if (showArchiveAsUnarchive) {
                 SwipeTaskItem(
@@ -1247,34 +1248,53 @@ private fun TaskRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .heightIn(min = 40.dp)
             .clickable(onClick = onEditTask)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .padding(horizontal = 9.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
             modifier = Modifier
-                .width(5.dp)
-                .height(22.dp)
+                .width(4.dp)
+                .height(18.dp)
                 .background(indicatorColor, RoundedCornerShape(3.dp))
         )
-        Spacer(modifier = Modifier.width(8.dp))
+        Spacer(modifier = Modifier.width(6.dp))
 
         Text(
             text = task.title,
             modifier = Modifier.weight(1f),
-            fontSize = 16.sp,
+            fontSize = 14.sp,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             color = if (task.completed) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
             textDecoration = if (task.completed) TextDecoration.LineThrough else TextDecoration.None
         )
 
-        IconButton(onClick = onToggleCompleted) {
-            Icon(imageVector = Icons.Filled.Check, contentDescription = "Completar")
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .clickable(onClick = onToggleCompleted),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Check,
+                contentDescription = "Completar",
+                modifier = Modifier.size(18.dp)
+            )
         }
 
-        IconButton(onClick = { menuExpanded = true }) {
-            Icon(imageVector = Icons.Filled.MoreVert, contentDescription = "Mas acciones")
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .clickable(onClick = { menuExpanded = true }),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Filled.MoreVert,
+                contentDescription = "Mas acciones",
+                modifier = Modifier.size(18.dp)
+            )
         }
 
         DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {

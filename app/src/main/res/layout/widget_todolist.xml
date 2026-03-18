@@ -4,7 +4,7 @@
     android:layout_height="match_parent"
     android:background="@android:color/white"
     android:orientation="vertical"
-    android:padding="12dp">
+    android:padding="6dp">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -19,21 +19,21 @@
             android:layout_weight="1"
             android:text="TodoList"
             android:textColor="@android:color/black"
-            android:textSize="18sp"
+            android:textSize="15sp"
             android:textStyle="bold" />
 
         <ImageButton
             android:id="@+id/widgetRefreshButton"
-            android:layout_width="36dp"
-            android:layout_height="36dp"
+            android:layout_width="28dp"
+            android:layout_height="28dp"
             android:background="@android:color/transparent"
             android:contentDescription="Refrescar"
             android:src="@android:drawable/ic_popup_sync" />
 
         <ImageButton
             android:id="@+id/widgetAddButton"
-            android:layout_width="36dp"
-            android:layout_height="36dp"
+            android:layout_width="28dp"
+            android:layout_height="28dp"
             android:background="@android:color/transparent"
             android:contentDescription="Nueva tarea"
             android:src="@android:drawable/ic_input_add" />
@@ -43,31 +43,31 @@
         android:id="@+id/widgetClearDoneButton"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
+        android:layout_marginTop="2dp"
         android:clickable="true"
         android:focusable="true"
         android:text="Archivar hechas"
         android:textColor="@android:color/holo_blue_dark"
-        android:textSize="13sp"
+        android:textSize="11sp"
         android:textStyle="bold" />
 
     <ListView
         android:id="@+id/widgetTaskList"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_marginTop="8dp"
+        android:layout_marginTop="2dp"
         android:layout_weight="1"
         android:divider="@android:color/darker_gray"
-        android:dividerHeight="1dp"
-        android:paddingBottom="2dp" />
+        android:dividerHeight="0.5dp"
+        android:paddingBottom="0dp" />
 
     <TextView
         android:id="@+id/widgetEmpty"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:gravity="center_vertical"
-        android:paddingTop="8dp"
+        android:paddingTop="2dp"
         android:text="Sin tareas abiertas"
         android:textColor="@android:color/darker_gray"
-        android:textSize="14sp" />
+        android:textSize="12sp" />
 </LinearLayout>

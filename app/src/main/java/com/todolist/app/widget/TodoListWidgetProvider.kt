@@ -62,12 +62,26 @@ class TodoListWidgetProvider : AppWidgetProvider() {
             }
             ACTION_TOGGLE_DONE -> {
                 val uid = FirebaseAuth.getInstance().currentUser?.uid.orEmpty()
+                val appWidgetId = intent.getIntExtra(
+                    AppWidgetManager.EXTRA_APPWIDGET_ID,
+                    AppWidgetManager.INVALID_APPWIDGET_ID
+                )
                 val taskId = intent.getStringExtra(EXTRA_TASK_ID).orEmpty()
                 val markDone = intent.getBooleanExtra(EXTRA_MARK_DONE, true)
-                if (uid.isBlank() || taskId.isBlank()) return
+                if (uid.isBlank() || taskId.isBlank()) {
+                    Log.w(
+                        LOG_TAG,
+                        "Ignoring widget toggle without required extras. appWidgetId=$appWidgetId uidBlank=${uid.isBlank()} taskIdBlank=${taskId.isBlank()}"
+                    )
+                    return
+                }
 
                 val pendingResult = goAsync()
                 widgetScope.launch {
+                    Log.d(
+                        LOG_TAG,
+                        "Widget toggle requested. appWidgetId=$appWidgetId taskId=$taskId markDone=$markDone"
+                    )
                     runCatching {
                         FirebaseFirestore.getInstance()
                             .collection("users")
@@ -170,7 +184,7 @@ class TodoListWidgetProvider : AppWidgetProvider() {
             context,
             appWidgetId,
             toggleIntentTemplate,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
         )
         views.setPendingIntentTemplate(R.id.widgetTaskList, togglePendingIntentTemplate)
 
