@@ -105,6 +105,7 @@ private class TodoListWidgetFactory(
                     putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
                 }
                 views.setOnClickFillInIntent(R.id.widgetItemRoot, openTaskFillInIntent)
+                views.setOnClickFillInIntent(R.id.widgetItemTitle, openTaskFillInIntent)
 
                 val toggleFillInIntent = Intent().apply {
                     putExtra(TodoListWidgetProvider.EXTRA_TASK_ID, entry.taskId)

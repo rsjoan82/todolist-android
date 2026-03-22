@@ -24,8 +24,6 @@
         android:id="@+id/widgetItemAction"
         android:layout_width="18dp"
         android:layout_height="18dp"
-        android:clickable="true"
         android:contentDescription="Cambiar estado"
-        android:focusable="true"
         android:src="@android:drawable/checkbox_off_background" />
 </LinearLayout>

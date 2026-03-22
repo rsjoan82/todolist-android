@@ -126,6 +126,11 @@ class TodoListWidgetProvider : AppWidgetProvider() {
                             return
                         }
 
+                        Log.d(
+                            LOG_TAG,
+                            "Widget open task requested. appWidgetId=$appWidgetId taskId=$taskId"
+                        )
+
                         context.startActivity(
                             Intent(context, MainActivity::class.java).apply {
                                 putExtra(MainActivity.EXTRA_OPEN_TASK_ID, taskId)
