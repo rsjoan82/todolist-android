@@ -112,17 +112,18 @@ class AuthViewModel : ViewModel() {
 class MainActivity : ComponentActivity() {
     companion object {
         const val EXTRA_OPEN_CREATE_TASK = "open_create_task"
+        const val EXTRA_OPEN_TASK_ID = "open_task_id"
     }
 
     private val authViewModel: AuthViewModel by viewModels()
     private val taskViewModel: TaskViewModel by viewModels()
     private val openCreateRequest = mutableStateOf(0)
+    private val openTaskRequest = mutableStateOf(0)
+    private val openTaskId = mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (intent?.getBooleanExtra(EXTRA_OPEN_CREATE_TASK, false) == true) {
-            openCreateRequest.value += 1
-        }
+        handleLaunchIntent(intent)
         enableEdgeToEdge()
         setContent {
             TodoListTheme {
@@ -130,6 +131,8 @@ class MainActivity : ComponentActivity() {
                     viewModel = authViewModel,
                     taskViewModel = taskViewModel,
                     openCreateRequest = openCreateRequest.value,
+                    openTaskRequest = openTaskRequest.value,
+                    openTaskId = openTaskId.value,
                     modifier = Modifier.fillMaxSize()
                 )
             }
@@ -138,9 +141,22 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        if (intent.getBooleanExtra(EXTRA_OPEN_CREATE_TASK, false)) {
+        setIntent(intent)
+        handleLaunchIntent(intent)
+    }
+
+    private fun handleLaunchIntent(intent: Intent?) {
+        if (intent?.getBooleanExtra(EXTRA_OPEN_CREATE_TASK, false) == true) {
             openCreateRequest.value += 1
         }
+
+        intent?.getStringExtra(EXTRA_OPEN_TASK_ID)
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?.let { taskId ->
+                openTaskId.value = taskId
+                openTaskRequest.value += 1
+            }
     }
 }
 
@@ -149,6 +165,8 @@ private fun AuthGate(
     viewModel: AuthViewModel,
     taskViewModel: TaskViewModel,
     openCreateRequest: Int,
+    openTaskRequest: Int,
+    openTaskId: String?,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -195,6 +213,8 @@ private fun AuthGate(
             onDeleteTask = taskViewModel::deleteTask,
             onSaveTask = taskViewModel::saveTaskEdits,
             openCreateRequest = openCreateRequest,
+            openTaskRequest = openTaskRequest,
+            openTaskId = openTaskId,
             onLogout = {
                 viewModel.onSignedOut()
                 scope.launch {
@@ -255,6 +275,8 @@ private fun HomeScreen(
     onDeleteTask: (Task) -> Unit,
     onSaveTask: (Task, String, TaskPriority, Timestamp?, String?) -> Unit,
     openCreateRequest: Int,
+    openTaskRequest: Int,
+    openTaskId: String?,
     onLogout: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -318,6 +340,8 @@ private fun HomeScreen(
             hasSession = taskUiState.user != null,
             openFilterRequest = openFilterRequest,
             openCreateRequest = openCreateRequest,
+            openTaskRequest = openTaskRequest,
+            openTaskId = openTaskId,
             modifier = Modifier.weight(1f)
         )
     }

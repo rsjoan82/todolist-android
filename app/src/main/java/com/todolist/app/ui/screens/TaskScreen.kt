@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -126,6 +127,8 @@ fun TaskScreen(
     hasSession: Boolean,
     openFilterRequest: Int = 0,
     openCreateRequest: Int = 0,
+    openTaskRequest: Int = 0,
+    openTaskId: String? = null,
     modifier: Modifier = Modifier
 ) {
     var selectedTab by remember { mutableStateOf(TaskTab.OPEN) }
@@ -142,6 +145,7 @@ fun TaskScreen(
     var editPriority by remember { mutableStateOf(TaskPriority.MEDIO) }
     var editDueDate by remember { mutableStateOf<Timestamp?>(null) }
     var showTagFilterSheet by remember { mutableStateOf(false) }
+    var handledOpenTaskRequest by remember { mutableStateOf(0) }
     val context = LocalContext.current
     var selectedTag by remember { mutableStateOf(TaskFilterPreferences.getSelectedTag(context)) }
     var draftSelectedTag by remember { mutableStateOf(selectedTag) }
@@ -204,6 +208,21 @@ fun TaskScreen(
             onClearCreateError()
             showCreateSheet = true
         }
+    }
+
+    LaunchedEffect(openTaskRequest, openTaskId, openTasks, doneTasks, archivedTasks) {
+        if (openTaskRequest <= handledOpenTaskRequest) return@LaunchedEffect
+
+        val requestedTaskId = openTaskId?.trim()?.takeIf { it.isNotEmpty() } ?: return@LaunchedEffect
+        val taskToOpen = (openTasks + doneTasks + archivedTasks).firstOrNull { it.id == requestedTaskId }
+            ?: return@LaunchedEffect
+
+        editingTask = taskToOpen
+        editTitle = taskToOpen.title
+        editSelectedTagId = taskToOpen.tagId
+        editPriority = taskToOpen.priority
+        editDueDate = taskToOpen.dueDate
+        handledOpenTaskRequest = openTaskRequest
     }
 
     val openCreateSheet = {
@@ -334,6 +353,7 @@ fun TaskScreen(
             onClick = openCreateSheet,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
+                .navigationBarsPadding()
                 .padding(16.dp)
         ) {
             Icon(imageVector = Icons.Filled.Add, contentDescription = "Nueva tarea")
@@ -470,7 +490,7 @@ private fun EmptyTabState(
 }
 
 @Composable
-private fun NewTaskSheetContent(
+fun NewTaskSheetContent(
     tags: List<Tag>,
     title: String,
     onTitleChange: (String) -> Unit,

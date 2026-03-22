@@ -99,12 +99,20 @@ private class TodoListWidgetFactory(
                 )
                 views.setTextColor(R.id.widgetItemTitle, context.getColor(android.R.color.black))
 
-                val fillInIntent = Intent().apply {
+                val openTaskFillInIntent = Intent().apply {
                     putExtra(TodoListWidgetProvider.EXTRA_TASK_ID, entry.taskId)
-                    putExtra(TodoListWidgetProvider.EXTRA_MARK_DONE, !entry.isDone)
+                    putExtra(TodoListWidgetProvider.EXTRA_ITEM_ACTION, TodoListWidgetProvider.ITEM_ACTION_OPEN_TASK)
                     putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
                 }
-                views.setOnClickFillInIntent(R.id.widgetItemAction, fillInIntent)
+                views.setOnClickFillInIntent(R.id.widgetItemRoot, openTaskFillInIntent)
+
+                val toggleFillInIntent = Intent().apply {
+                    putExtra(TodoListWidgetProvider.EXTRA_TASK_ID, entry.taskId)
+                    putExtra(TodoListWidgetProvider.EXTRA_MARK_DONE, !entry.isDone)
+                    putExtra(TodoListWidgetProvider.EXTRA_ITEM_ACTION, TodoListWidgetProvider.ITEM_ACTION_TOGGLE_DONE)
+                    putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
+                }
+                views.setOnClickFillInIntent(R.id.widgetItemAction, toggleFillInIntent)
             }
         }
         return views

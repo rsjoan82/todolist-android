@@ -27,6 +27,11 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".WidgetCreateTaskActivity"
+            android:exported="false"
+            android:theme="@style/Theme.TodoList.Dialog" />
+
         <receiver
             android:name=".widget.TodoListWidgetProvider"
             android:exported="true"
@@ -34,7 +39,8 @@
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
                 <action android:name="TODO_WIDGET_REFRESH" />
-                <action android:name="TODO_WIDGET_DONE" />
+                <action android:name="TODO_WIDGET_ITEM_CLICK" />
+                <action android:name="TODO_WIDGET_CLEAR_DONE" />
             </intent-filter>
 
             <meta-data
