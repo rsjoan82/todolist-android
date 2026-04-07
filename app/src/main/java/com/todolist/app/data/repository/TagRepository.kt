@@ -73,6 +73,7 @@ class TagRepository(
         require(cleanName.isNotEmpty()) { "El nombre del tag es obligatorio" }
 
         val normalizedName = normalizeTagName(cleanName)
+        val formattedName = formatTagName(cleanName)
         val existingTag = getTagsOnce(uid)
             .firstOrNull { normalizeTagName(it.name) == normalizedName }
         require(existingTag == null) { "Ya existe un tag con ese nombre" }
@@ -88,7 +89,7 @@ class TagRepository(
                 docRef,
                 mapOf(
                     "ownerId" to uid,
-                    "name" to cleanName,
+                    "name" to formattedName,
                     "normalizedName" to normalizedName,
                     "createdAt" to FieldValue.serverTimestamp(),
                     "updatedAt" to FieldValue.serverTimestamp()
@@ -108,7 +109,7 @@ class TagRepository(
         return Tag(
             id = docRef.id,
             ownerId = uid,
-            name = cleanName,
+            name = formattedName,
             color = null
         )
     }
@@ -121,6 +122,7 @@ class TagRepository(
         require(cleanName.isNotEmpty()) { "El nombre del tag es obligatorio" }
 
         val normalizedName = normalizeTagName(cleanName)
+        val formattedName = formatTagName(cleanName)
         val existingTag = getTagsOnce(uid)
             .firstOrNull { tag ->
                 tag.id != cleanTagId && normalizeTagName(tag.name) == normalizedName
@@ -142,7 +144,7 @@ class TagRepository(
                 transaction.update(
                     tagRef,
                     mapOf(
-                        "name" to cleanName,
+                        "name" to formattedName,
                         "normalizedName" to normalizedName,
                         "updatedAt" to FieldValue.serverTimestamp()
                     )
@@ -158,7 +160,7 @@ class TagRepository(
             transaction.update(
                 tagRef,
                 mapOf(
-                    "name" to cleanName,
+                    "name" to formattedName,
                     "normalizedName" to normalizedName,
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
@@ -227,6 +229,13 @@ class TagRepository(
 
     private fun normalizeTagName(value: String): String {
         return value.trim().lowercase(Locale.ROOT)
+    }
+
+    private fun formatTagName(value: String): String {
+        val clean = value.trim().lowercase(Locale.ROOT)
+        return clean.replaceFirstChar {
+            if (it.isLowerCase()) it.titlecase(Locale.ROOT) else it.toString()
+        }
     }
 
     private fun tagNameKeyDocument(uid: String, normalizedName: String) = firestore
