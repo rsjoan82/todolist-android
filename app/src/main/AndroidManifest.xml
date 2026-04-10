@@ -48,8 +48,28 @@
                 android:resource="@xml/todolist_widget_info" />
         </receiver>
 
+        <receiver
+            android:name=".widget.ProjectListWidgetProvider"
+            android:exported="true"
+            android:label="Proyectos">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="PROJECT_WIDGET_REFRESH" />
+                <action android:name="PROJECT_WIDGET_OPEN_PROJECT" />
+            </intent-filter>
+
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/projects_widget_info" />
+        </receiver>
+
         <service
             android:name=".widget.TodoListWidgetService"
+            android:exported="false"
+            android:permission="android.permission.BIND_REMOTEVIEWS" />
+
+        <service
+            android:name=".widget.ProjectListWidgetService"
             android:exported="false"
             android:permission="android.permission.BIND_REMOTEVIEWS" />
     </application>

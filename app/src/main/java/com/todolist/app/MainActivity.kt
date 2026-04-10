@@ -23,7 +23,10 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -54,8 +57,11 @@ import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
 import com.todolist.app.data.model.Task
 import com.todolist.app.data.model.TaskPriority
+import com.todolist.app.ui.screens.ProjectScreen
 import com.todolist.app.ui.screens.TaskScreen
 import com.todolist.app.ui.theme.TodoListTheme
+import com.todolist.app.viewmodel.ProjectUiState
+import com.todolist.app.viewmodel.ProjectViewModel
 import com.todolist.app.viewmodel.TaskUiState
 import com.todolist.app.viewmodel.TaskViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -113,13 +119,17 @@ class MainActivity : ComponentActivity() {
     companion object {
         const val EXTRA_OPEN_CREATE_TASK = "open_create_task"
         const val EXTRA_OPEN_TASK_ID = "open_task_id"
+        const val EXTRA_OPEN_PROJECT_ID = "open_project_id"
     }
 
     private val authViewModel: AuthViewModel by viewModels()
     private val taskViewModel: TaskViewModel by viewModels()
+    private val projectViewModel: ProjectViewModel by viewModels()
     private val openCreateRequest = mutableStateOf(0)
     private val openTaskRequest = mutableStateOf(0)
     private val openTaskId = mutableStateOf<String?>(null)
+    private val openProjectRequest = mutableStateOf(0)
+    private val openProjectId = mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -130,9 +140,12 @@ class MainActivity : ComponentActivity() {
                 AuthGate(
                     viewModel = authViewModel,
                     taskViewModel = taskViewModel,
+                    projectViewModel = projectViewModel,
                     openCreateRequest = openCreateRequest.value,
                     openTaskRequest = openTaskRequest.value,
                     openTaskId = openTaskId.value,
+                    openProjectRequest = openProjectRequest.value,
+                    openProjectId = openProjectId.value,
                     modifier = Modifier.fillMaxSize()
                 )
             }
@@ -157,6 +170,14 @@ class MainActivity : ComponentActivity() {
                 openTaskId.value = taskId
                 openTaskRequest.value += 1
             }
+
+        intent?.getStringExtra(EXTRA_OPEN_PROJECT_ID)
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?.let { projectId ->
+                openProjectId.value = projectId
+                openProjectRequest.value += 1
+            }
     }
 }
 
@@ -164,9 +185,12 @@ class MainActivity : ComponentActivity() {
 private fun AuthGate(
     viewModel: AuthViewModel,
     taskViewModel: TaskViewModel,
+    projectViewModel: ProjectViewModel,
     openCreateRequest: Int,
     openTaskRequest: Int,
     openTaskId: String?,
+    openProjectRequest: Int,
+    openProjectId: String?,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -175,6 +199,7 @@ private fun AuthGate(
     val scope = rememberCoroutineScope()
     val uiState by viewModel.uiState.collectAsState()
     val taskUiState by taskViewModel.uiState.collectAsState()
+    val projectUiState by projectViewModel.uiState.collectAsState()
 
     if (uiState.user == null) {
         LoginScreen(
@@ -201,6 +226,7 @@ private fun AuthGate(
     } else {
         HomeScreen(
             taskUiState = taskUiState,
+            projectUiState = projectUiState,
             modifier = modifier,
             onAddTask = taskViewModel::addTask,
             onCreateTag = taskViewModel::createTag,
@@ -212,9 +238,19 @@ private fun AuthGate(
             onToggleArchived = taskViewModel::toggleArchived,
             onDeleteTask = taskViewModel::deleteTask,
             onSaveTask = taskViewModel::saveTaskEdits,
+            onSelectProject = projectViewModel::selectProject,
+            onCreateProject = projectViewModel::createProject,
+            onRenameProject = projectViewModel::renameProject,
+            onDeleteProject = projectViewModel::deleteProject,
+            onCreateProjectItem = projectViewModel::createProjectItem,
+            onEditProjectItem = projectViewModel::editProjectItem,
+            onDeleteProjectItem = projectViewModel::deleteProjectItem,
+            onToggleProjectItemDone = projectViewModel::toggleProjectItemDone,
             openCreateRequest = openCreateRequest,
             openTaskRequest = openTaskRequest,
             openTaskId = openTaskId,
+            openProjectRequest = openProjectRequest,
+            openProjectId = openProjectId,
             onLogout = {
                 viewModel.onSignedOut()
                 scope.launch {
@@ -258,6 +294,7 @@ private fun LoginScreen(
 @Composable
 private fun HomeScreen(
     taskUiState: TaskUiState,
+    projectUiState: ProjectUiState,
     onAddTask: (
         String,
         TaskPriority,
@@ -274,14 +311,42 @@ private fun HomeScreen(
     onToggleArchived: (Task) -> Unit,
     onDeleteTask: (Task) -> Unit,
     onSaveTask: (Task, String, TaskPriority, Timestamp?, String?) -> Unit,
+    onSelectProject: (String?) -> Unit,
+    onCreateProject: (String) -> Unit,
+    onRenameProject: (com.todolist.app.data.model.Project, String) -> Unit,
+    onDeleteProject: (com.todolist.app.data.model.Project) -> Unit,
+    onCreateProjectItem: (String, String, String, com.todolist.app.data.model.ProjectItemType) -> Unit,
+    onEditProjectItem: (com.todolist.app.data.model.ProjectItem, String, String, com.todolist.app.data.model.ProjectItemType) -> Unit,
+    onDeleteProjectItem: (com.todolist.app.data.model.ProjectItem) -> Unit,
+    onToggleProjectItemDone: (com.todolist.app.data.model.ProjectItem) -> Unit,
     openCreateRequest: Int,
     openTaskRequest: Int,
     openTaskId: String?,
+    openProjectRequest: Int,
+    openProjectId: String?,
     onLogout: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     var openFilterRequest by remember { mutableStateOf(0) }
+    var selectedSection by remember { mutableStateOf(HomeSection.TASKS) }
+
+    LaunchedEffect(openCreateRequest, openTaskRequest, openTaskId) {
+        val shouldOpenTasks = openCreateRequest > 0 || (
+            openTaskRequest > 0 && openTaskId?.trim()?.isNotEmpty() == true
+        )
+        if (shouldOpenTasks) {
+            selectedSection = HomeSection.TASKS
+        }
+    }
+
+    LaunchedEffect(openProjectRequest, openProjectId) {
+        val projectId = openProjectId?.trim()?.takeIf { it.isNotEmpty() } ?: return@LaunchedEffect
+        if (openProjectRequest > 0) {
+            selectedSection = HomeSection.PROJECTS
+            onSelectProject(projectId)
+        }
+    }
 
     Column(
         modifier = modifier.padding(24.dp),
@@ -293,59 +358,99 @@ private fun HomeScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(text = "Tareas", style = MaterialTheme.typography.headlineMedium)
+            Text(
+                text = if (selectedSection == HomeSection.TASKS) "Tareas" else "Proyectos",
+                style = MaterialTheme.typography.headlineMedium
+            )
             Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = { openFilterRequest += 1 }) {
-                    Icon(imageVector = Icons.Filled.FilterList, contentDescription = "Filtrar")
+                if (selectedSection == HomeSection.TASKS) {
+                    IconButton(onClick = { openFilterRequest += 1 }) {
+                        Icon(imageVector = Icons.Filled.FilterList, contentDescription = "Filtrar")
+                    }
                 }
                 Box {
-                IconButton(onClick = { menuExpanded = true }) {
-                    Icon(imageVector = Icons.Filled.MoreVert, contentDescription = "Menu")
-                }
-                DropdownMenu(
-                    expanded = menuExpanded,
-                    onDismissRequest = { menuExpanded = false }
-                ) {
-                    DropdownMenuItem(
-                        text = { Text("Salir") },
-                        onClick = {
-                            menuExpanded = false
-                            onLogout()
-                        }
-                    )
-                }
+                    IconButton(onClick = { menuExpanded = true }) {
+                        Icon(imageVector = Icons.Filled.MoreVert, contentDescription = "Menu")
+                    }
+                    DropdownMenu(
+                        expanded = menuExpanded,
+                        onDismissRequest = { menuExpanded = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Salir") },
+                            onClick = {
+                                menuExpanded = false
+                                onLogout()
+                            }
+                        )
+                    }
                 }
             }
         }
         Spacer(modifier = Modifier.height(12.dp))
-        TaskScreen(
-            tags = taskUiState.tags,
-            openTasks = taskUiState.openTasks,
-            doneTasks = taskUiState.doneTasks,
-            archivedTasks = taskUiState.archivedTasks,
-            isLoading = taskUiState.isLoading,
-            errorMessage = taskUiState.errorMessage,
-            onAddTask = onAddTask,
-            onCreateTag = onCreateTag,
-            onRenameTag = onRenameTag,
-            onDeleteTag = onDeleteTag,
-            isCreating = taskUiState.isCreating,
-            createError = taskUiState.createError,
-            onClearCreateError = onClearCreateError,
-            onToggleCompleted = onToggleCompleted,
-            onChangePriority = onChangePriority,
-            onToggleArchived = onToggleArchived,
-            onDeleteTask = onDeleteTask,
-            onSaveTask = onSaveTask,
-            hasSession = taskUiState.user != null,
-            openFilterRequest = openFilterRequest,
-            openCreateRequest = openCreateRequest,
-            openTaskRequest = openTaskRequest,
-            openTaskId = openTaskId,
-            modifier = Modifier.weight(1f)
-        )
+        TabRow(selectedTabIndex = if (selectedSection == HomeSection.TASKS) 0 else 1) {
+            Tab(
+                selected = selectedSection == HomeSection.TASKS,
+                onClick = { selectedSection = HomeSection.TASKS },
+                text = { Text("Tareas") }
+            )
+            Tab(
+                selected = selectedSection == HomeSection.PROJECTS,
+                onClick = { selectedSection = HomeSection.PROJECTS },
+                text = { Text("Proyectos") }
+            )
+        }
+        Spacer(modifier = Modifier.height(12.dp))
+        if (selectedSection == HomeSection.TASKS) {
+            TaskScreen(
+                tags = taskUiState.tags,
+                openTasks = taskUiState.openTasks,
+                doneTasks = taskUiState.doneTasks,
+                archivedTasks = taskUiState.archivedTasks,
+                isLoading = taskUiState.isLoading,
+                errorMessage = taskUiState.errorMessage,
+                onAddTask = onAddTask,
+                onCreateTag = onCreateTag,
+                onRenameTag = onRenameTag,
+                onDeleteTag = onDeleteTag,
+                isCreating = taskUiState.isCreating,
+                createError = taskUiState.createError,
+                onClearCreateError = onClearCreateError,
+                onToggleCompleted = onToggleCompleted,
+                onChangePriority = onChangePriority,
+                onToggleArchived = onToggleArchived,
+                onDeleteTask = onDeleteTask,
+                onSaveTask = onSaveTask,
+                hasSession = taskUiState.user != null,
+                openFilterRequest = openFilterRequest,
+                openCreateRequest = openCreateRequest,
+                openTaskRequest = openTaskRequest,
+                openTaskId = openTaskId,
+                modifier = Modifier.weight(1f)
+            )
+        } else {
+            ProjectScreen(
+                projectSummaries = projectUiState.projectSummaries,
+                selectedProjectSummary = projectUiState.selectedProjectSummary,
+                selectedProjectItems = projectUiState.selectedProjectItems,
+                isLoading = projectUiState.isLoading,
+                isSaving = projectUiState.isSaving,
+                errorMessage = projectUiState.errorMessage,
+                onSelectProject = onSelectProject,
+                onCreateProject = onCreateProject,
+                onRenameProject = onRenameProject,
+                onDeleteProject = onDeleteProject,
+                onCreateProjectItem = onCreateProjectItem,
+                onEditProjectItem = onEditProjectItem,
+                onDeleteProjectItem = onDeleteProjectItem,
+                onToggleProjectItemDone = onToggleProjectItemDone,
+                modifier = Modifier.weight(1f)
+            )
+        }
     }
 }
+
+private enum class HomeSection { TASKS, PROJECTS }
 
 private suspend fun signInWithGoogle(
     auth: FirebaseAuth,
