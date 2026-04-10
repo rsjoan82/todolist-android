@@ -177,6 +177,22 @@ class ProjectViewModel(
     }
 
     private fun syncUiState() {
+        val selectedProjectId = updateProjectSummaries()
+
+        _uiState.update { state ->
+            state.copy(
+                selectedProjectId = selectedProjectId,
+                selectedProjectItems = latestItems
+                    .filter { it.projectId == selectedProjectId }
+                    .sortedForProject(),
+                isLoading = false
+            )
+        }
+
+        observeItemsForCurrentProjects()
+    }
+
+    private fun updateProjectSummaries(): String? {
         val summaries = latestProjects.map { project ->
             val projectItems = latestItems.filter { it.projectId == project.id }
             val pendingCount = projectItems.count { !it.done }
@@ -188,21 +204,17 @@ class ProjectViewModel(
             )
         }
 
-        _uiState.update { state ->
-            val selectedProjectId = state.selectedProjectId
-                ?.takeIf { projectId -> summaries.any { it.project.id == projectId } }
+        val selectedProjectId = _uiState.value.selectedProjectId
+            ?.takeIf { projectId -> summaries.any { it.project.id == projectId } }
 
+        _uiState.update { state ->
             state.copy(
                 projectSummaries = summaries,
-                selectedProjectId = selectedProjectId,
-                selectedProjectItems = latestItems
-                    .filter { it.projectId == selectedProjectId }
-                    .sortedForProject(),
-                isLoading = false
+                selectedProjectId = selectedProjectId
             )
         }
 
-        observeItemsForCurrentProjects()
+        return selectedProjectId
     }
 
     private fun clearData() {
@@ -245,10 +257,12 @@ class ProjectViewModel(
                 }
                 .collect { items ->
                     latestItems = items
+                    val selectedProjectId = updateProjectSummaries()
                     _uiState.update { state ->
                         state.copy(
+                            selectedProjectId = selectedProjectId,
                             selectedProjectItems = latestItems
-                                .filter { it.projectId == state.selectedProjectId }
+                                .filter { it.projectId == selectedProjectId }
                                 .sortedForProject(),
                             isLoading = false
                         )

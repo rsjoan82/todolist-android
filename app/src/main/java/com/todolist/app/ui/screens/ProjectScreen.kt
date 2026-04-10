@@ -1,5 +1,6 @@
 package com.todolist.app.ui.screens
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -53,6 +54,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
@@ -401,9 +403,17 @@ private fun ProjectSummaryRow(
     onRename: () -> Unit,
     onDelete: () -> Unit
 ) {
+    val pendingCount = summary.pendingCount
+    val backgroundColor = when {
+        pendingCount == 0 -> Color(0xFFE8F5E9)
+        pendingCount in 1..3 -> Color(0xFFFFF8E1)
+        else -> Color(0xFFFDECEA)
+    }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .background(backgroundColor)
             .clickable(onClick = onOpen)
             .padding(vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
