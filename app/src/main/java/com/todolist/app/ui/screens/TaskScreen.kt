@@ -7,8 +7,11 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -17,7 +20,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -523,80 +528,94 @@ fun NewTaskSheetContent(
     isCreating: Boolean
 ) {
     val focusRequester = remember { FocusRequester() }
+    val scrollState = rememberScrollState()
 
     LaunchedEffect(Unit) {
         focusRequester.requestFocus()
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        Text("Nueva tarea", style = MaterialTheme.typography.titleMedium)
-
-        OutlinedTextField(
-            value = title,
-            onValueChange = onTitleChange,
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .focusRequester(focusRequester),
-            singleLine = true,
-            enabled = !isCreating,
-            label = { Text("Titulo") }
-        )
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .heightIn(max = maxHeight * 0.85f)
+                .imePadding()
+                .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            PrioritySelector(
-                selected = selectedPriority,
-                onSelected = onPrioritySelected,
-                modifier = Modifier.weight(1f),
-                enabled = !isCreating
-            )
-            DueDateSelector(
-                selectedDueDate = selectedDueDate,
-                onDueDateSelected = onDueDateSelected,
-                onClearDueDate = onClearDueDate,
-                modifier = Modifier.weight(1f),
-                enabled = !isCreating
-            )
-        }
+            Text("Nueva tarea", style = MaterialTheme.typography.titleMedium)
 
-        TagSelector(
-            tags = tags,
-            selectedTagId = selectedTagId,
-            onSelectedTagIdChange = onSelectedTagIdChange,
-            onCreateTag = onCreateTag,
-            onRenameTag = onRenameTag,
-            onDeleteTag = onDeleteTag,
-            enabled = !isCreating
-        )
-
-        if (!hasSession) {
-            Text("No hay sesion. Abre login.", color = MaterialTheme.colorScheme.error)
-        }
-        createError?.let {
-            Text(it, color = MaterialTheme.colorScheme.error)
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Button(onClick = onCancel, modifier = Modifier.weight(1f), enabled = !isCreating) {
-                Text("Cancelar")
-            }
-            Button(
-                onClick = onCreate,
-                modifier = Modifier.weight(1f),
-                enabled = title.isNotBlank() && hasSession && !isCreating
+            Column(
+                modifier = Modifier
+                    .weight(1f, fill = false)
+                    .verticalScroll(scrollState),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text(if (isCreating) "Creando..." else "Crear")
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = onTitleChange,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .focusRequester(focusRequester),
+                    singleLine = true,
+                    enabled = !isCreating,
+                    label = { Text("Titulo") }
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    PrioritySelector(
+                        selected = selectedPriority,
+                        onSelected = onPrioritySelected,
+                        modifier = Modifier.weight(1f),
+                        enabled = !isCreating
+                    )
+                    DueDateSelector(
+                        selectedDueDate = selectedDueDate,
+                        onDueDateSelected = onDueDateSelected,
+                        onClearDueDate = onClearDueDate,
+                        modifier = Modifier.weight(1f),
+                        enabled = !isCreating
+                    )
+                }
+
+                TagSelector(
+                    tags = tags,
+                    selectedTagId = selectedTagId,
+                    onSelectedTagIdChange = onSelectedTagIdChange,
+                    onCreateTag = onCreateTag,
+                    onRenameTag = onRenameTag,
+                    onDeleteTag = onDeleteTag,
+                    enabled = !isCreating
+                )
+
+                if (!hasSession) {
+                    Text("No hay sesion. Abre login.", color = MaterialTheme.colorScheme.error)
+                }
+                createError?.let {
+                    Text(it, color = MaterialTheme.colorScheme.error)
+                }
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(onClick = onCancel, modifier = Modifier.weight(1f), enabled = !isCreating) {
+                    Text("Cancelar")
+                }
+                Button(
+                    onClick = onCreate,
+                    modifier = Modifier.weight(1f),
+                    enabled = title.isNotBlank() && hasSession && !isCreating
+                ) {
+                    Text(if (isCreating) "Creando..." else "Crear")
+                }
             }
         }
     }
@@ -622,66 +641,82 @@ private fun EditTaskSheetContent(
     onDelete: () -> Unit
 ) {
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    val scrollState = rememberScrollState()
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = maxHeight * 0.85f)
+                .imePadding()
+                .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            IconButton(onClick = { showDeleteConfirm = true }) {
-                Icon(Icons.Filled.Delete, contentDescription = "Borrar tarea")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Editar tarea", style = MaterialTheme.typography.titleMedium)
+                IconButton(onClick = { showDeleteConfirm = true }) {
+                    Icon(Icons.Filled.Delete, contentDescription = "Borrar tarea")
+                }
             }
-        }
 
-        OutlinedTextField(
-            value = title,
-            onValueChange = onTitleChange,
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            label = { Text("Titulo") }
-        )
+            Column(
+                modifier = Modifier
+                    .weight(1f, fill = false)
+                    .verticalScroll(scrollState),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = onTitleChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text("Titulo") }
+                )
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            PrioritySelector(
-                selected = selectedPriority,
-                onSelected = onPrioritySelected,
-                modifier = Modifier.weight(1f)
-            )
-            DueDateSelector(
-                selectedDueDate = selectedDueDate,
-                onDueDateSelected = onDueDateSelected,
-                onClearDueDate = onClearDueDate,
-                modifier = Modifier.weight(1f)
-            )
-        }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    PrioritySelector(
+                        selected = selectedPriority,
+                        onSelected = onPrioritySelected,
+                        modifier = Modifier.weight(1f)
+                    )
+                    DueDateSelector(
+                        selectedDueDate = selectedDueDate,
+                        onDueDateSelected = onDueDateSelected,
+                        onClearDueDate = onClearDueDate,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
 
-        TagSelector(
-            tags = tags,
-            selectedTagId = selectedTagId,
-            onSelectedTagIdChange = onSelectedTagIdChange,
-            onCreateTag = onCreateTag,
-            onRenameTag = onRenameTag,
-            onDeleteTag = onDeleteTag
-        )
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Button(onClick = onCancel, modifier = Modifier.weight(1f)) {
-                Text("Cancelar")
+                TagSelector(
+                    tags = tags,
+                    selectedTagId = selectedTagId,
+                    onSelectedTagIdChange = onSelectedTagIdChange,
+                    onCreateTag = onCreateTag,
+                    onRenameTag = onRenameTag,
+                    onDeleteTag = onDeleteTag
+                )
             }
-            Button(onClick = onSave, modifier = Modifier.weight(1f), enabled = title.isNotBlank()) {
-                Text("Guardar")
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(onClick = onCancel, modifier = Modifier.weight(1f)) {
+                    Text("Cancelar")
+                }
+                Button(onClick = onSave, modifier = Modifier.weight(1f), enabled = title.isNotBlank()) {
+                    Text("Guardar")
+                }
             }
         }
     }

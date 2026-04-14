@@ -193,16 +193,18 @@ class ProjectViewModel(
     }
 
     private fun updateProjectSummaries(): String? {
-        val summaries = latestProjects.map { project ->
-            val projectItems = latestItems.filter { it.projectId == project.id }
-            val pendingCount = projectItems.count { !it.done }
-            ProjectSummary(
-                project = project,
-                pendingCount = pendingCount,
-                totalCount = projectItems.size,
-                status = if (pendingCount > 0) ProjectStatus.PENDING else ProjectStatus.COMPLETED
-            )
-        }
+        val summaries = latestProjects
+            .map { project ->
+                val projectItems = latestItems.filter { it.projectId == project.id }
+                val pendingCount = projectItems.count { !it.done }
+                ProjectSummary(
+                    project = project,
+                    pendingCount = pendingCount,
+                    totalCount = projectItems.size,
+                    status = if (pendingCount > 0) ProjectStatus.PENDING else ProjectStatus.COMPLETED
+                )
+            }
+            .sortedWith(projectSummaryComparator())
 
         val selectedProjectId = _uiState.value.selectedProjectId
             ?.takeIf { projectId -> summaries.any { it.project.id == projectId } }
@@ -215,6 +217,21 @@ class ProjectViewModel(
         }
 
         return selectedProjectId
+    }
+
+    private fun projectSummaryComparator(): Comparator<ProjectSummary> {
+        return compareBy<ProjectSummary> { it.pendingGroupRank() }
+            .thenByDescending { it.pendingCount }
+            .thenBy { it.project.name.trim().lowercase() }
+            .thenBy { it.project.id }
+    }
+
+    private fun ProjectSummary.pendingGroupRank(): Int {
+        return when {
+            pendingCount > 3 -> 0
+            pendingCount in 1..3 -> 1
+            else -> 2
+        }
     }
 
     private fun clearData() {

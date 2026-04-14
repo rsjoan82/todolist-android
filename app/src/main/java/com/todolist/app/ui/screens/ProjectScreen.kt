@@ -2,8 +2,11 @@ package com.todolist.app.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -13,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -623,6 +627,8 @@ private fun ProjectItemEditorDialog(
     onDismiss: () -> Unit,
     onConfirm: () -> Unit
 ) {
+    val scrollState = rememberScrollState()
+
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
@@ -631,115 +637,108 @@ private fun ProjectItemEditorDialog(
             modifier = Modifier
                 .fillMaxWidth()
                 .widthIn(max = 560.dp)
-                .padding(horizontal = 20.dp, vertical = 24.dp)
+                .padding(horizontal = 16.dp, vertical = 16.dp)
                 .imePadding(),
             shape = MaterialTheme.shapes.extraLarge,
             tonalElevation = 6.dp,
             shadowElevation = 12.dp
         ) {
-            Column(
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 20.dp),
-                verticalArrangement = Arrangement.spacedBy(18.dp)
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(
-                        text = title,
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        text = "Define un titulo claro y deja el contenido largo en la descripcion.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        text = "Titulo",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    OutlinedTextField(
-                        value = itemTitle,
-                        onValueChange = onTitleChange,
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("Ej. Mejorar filtros de la pantalla") },
-                        singleLine = true,
-                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                            capitalization = KeyboardCapitalization.Sentences
-                        ),
-                        supportingText = {
-                            Text("Este titulo es el que se mostrara en la lista.")
-                        }
-                    )
-                }
-
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        text = "Tipo",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        FilterChip(
-                            selected = itemType == ProjectItemType.BUG,
-                            onClick = { onTypeChange(ProjectItemType.BUG) },
-                            label = { Text("Bug") },
-                            leadingIcon = {
-                                Icon(Icons.Filled.BugReport, contentDescription = null)
-                            }
-                        )
-                        FilterChip(
-                            selected = itemType == ProjectItemType.IMPROVEMENT,
-                            onClick = { onTypeChange(ProjectItemType.IMPROVEMENT) },
-                            label = { Text("Mejora") },
-                            leadingIcon = {
-                                Icon(Icons.Filled.Star, contentDescription = null)
-                            }
-                        )
-                    }
-                }
-
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        text = "Descripcion",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    OutlinedTextField(
-                        value = itemDescription,
-                        onValueChange = onDescriptionChange,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = 220.dp),
-                        placeholder = { Text("Anade contexto, notas, detalles tecnicos o siguientes pasos...") },
-                        minLines = 8,
-                        maxLines = 14,
-                        supportingText = {
-                            Text("Pensado para texto largo y notas de trabajo.")
-                        }
-                    )
-                }
-
-                HorizontalDivider()
-
+            BoxWithConstraints {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = maxHeight * 0.88f)
+                        .padding(horizontal = 16.dp, vertical = 14.dp)
+                        .imePadding(),
+                    horizontalArrangement = Arrangement.Center
                 ) {
-                    OutlinedButton(
-                        onClick = onDismiss,
-                        modifier = Modifier.weight(1f)
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Text("Cancelar")
-                    }
-                    Button(
-                        onClick = onConfirm,
-                        modifier = Modifier.weight(1f),
-                        enabled = itemTitle.trim().isNotEmpty()
-                    ) {
-                        Text(confirmLabel)
+                        Text(
+                            text = title,
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.SemiBold
+                        )
+
+                        Column(
+                            modifier = Modifier
+                                .weight(1f, fill = false)
+                                .verticalScroll(scrollState),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = itemTitle,
+                                onValueChange = onTitleChange,
+                                modifier = Modifier.fillMaxWidth(),
+                                label = { Text("Titulo") },
+                                placeholder = { Text("Ej. Mejorar filtros") },
+                                singleLine = true,
+                                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                                    capitalization = KeyboardCapitalization.Sentences
+                                )
+                            )
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                FilterChip(
+                                    selected = itemType == ProjectItemType.BUG,
+                                    onClick = { onTypeChange(ProjectItemType.BUG) },
+                                    modifier = Modifier.weight(1f),
+                                    label = { Text("Bug") },
+                                    leadingIcon = {
+                                        Icon(Icons.Filled.BugReport, contentDescription = null)
+                                    }
+                                )
+                                FilterChip(
+                                    selected = itemType == ProjectItemType.IMPROVEMENT,
+                                    onClick = { onTypeChange(ProjectItemType.IMPROVEMENT) },
+                                    modifier = Modifier.weight(1f),
+                                    label = { Text("Mejora") },
+                                    leadingIcon = {
+                                        Icon(Icons.Filled.Star, contentDescription = null)
+                                    }
+                                )
+                            }
+
+                            OutlinedTextField(
+                                value = itemDescription,
+                                onValueChange = onDescriptionChange,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 120.dp),
+                                label = { Text("Descripcion") },
+                                placeholder = { Text("Notas o detalles...") },
+                                minLines = 4,
+                                maxLines = 8
+                            )
+                        }
+
+                        HorizontalDivider()
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .navigationBarsPadding(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = onDismiss,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Cancelar")
+                            }
+                            Button(
+                                onClick = onConfirm,
+                                modifier = Modifier.weight(1f),
+                                enabled = itemTitle.trim().isNotEmpty()
+                            ) {
+                                Text(confirmLabel)
+                            }
+                        }
                     }
                 }
             }
