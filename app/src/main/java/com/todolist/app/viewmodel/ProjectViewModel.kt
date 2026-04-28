@@ -1,5 +1,6 @@
 package com.todolist.app.viewmodel
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.firebase.auth.FirebaseAuth
@@ -49,6 +50,10 @@ class ProjectViewModel(
     private val auth: FirebaseAuth = FirebaseAuth.getInstance(),
     private val repository: ProjectRepository = ProjectRepository()
 ) : ViewModel() {
+    companion object {
+        private const val STARTUP_LOG_TAG = "TodoListStartup"
+    }
+
     private val _uiState = MutableStateFlow(ProjectUiState(user = auth.currentUser))
     val uiState: StateFlow<ProjectUiState> = _uiState.asStateFlow()
 
@@ -59,6 +64,7 @@ class ProjectViewModel(
 
     private val authStateListener = FirebaseAuth.AuthStateListener { firebaseAuth ->
         val user = firebaseAuth.currentUser
+        Log.d(STARTUP_LOG_TAG, "ProjectViewModel authStateListener user=${user?.uid ?: "null"}")
         _uiState.update { it.copy(user = user, errorMessage = null) }
 
         if (user == null) {
@@ -69,8 +75,12 @@ class ProjectViewModel(
     }
 
     init {
+        Log.d(STARTUP_LOG_TAG, "ProjectViewModel init currentUser=${auth.currentUser?.uid ?: "null"}")
         auth.addAuthStateListener(authStateListener)
-        auth.currentUser?.uid?.let(::observeData)
+        auth.currentUser?.uid?.let {
+            Log.d(STARTUP_LOG_TAG, "ProjectViewModel init observing uid=$it")
+            observeData(it)
+        }
     }
 
     override fun onCleared() {
@@ -81,6 +91,7 @@ class ProjectViewModel(
     }
 
     fun selectProject(projectId: String?) {
+        Log.d(STARTUP_LOG_TAG, "ProjectViewModel selectProject id=${projectId ?: "null"}")
         _uiState.update { state ->
             state.copy(
                 selectedProjectId = projectId,
@@ -145,6 +156,7 @@ class ProjectViewModel(
     }
 
     private fun observeData(uid: String) {
+        Log.d(STARTUP_LOG_TAG, "ProjectViewModel observeData uid=$uid")
         projectsJob?.cancel()
         itemsJob?.cancel()
         _uiState.update { it.copy(isLoading = true, errorMessage = null) }
@@ -152,6 +164,7 @@ class ProjectViewModel(
         projectsJob = viewModelScope.launch {
             repository.getProjects(uid)
                 .catch { error ->
+                    Log.e(STARTUP_LOG_TAG, "ProjectViewModel projects flow error uid=$uid", error)
                     _uiState.update {
                         it.copy(
                             isLoading = false,
@@ -160,6 +173,7 @@ class ProjectViewModel(
                     }
                 }
                 .collect { projects ->
+                    Log.d(STARTUP_LOG_TAG, "ProjectViewModel projects collected count=${projects.size}")
                     latestProjects = projects
                     syncUiState()
                 }
@@ -169,6 +183,7 @@ class ProjectViewModel(
             runCatching {
                 repository.migrateLegacyProjectItems(uid)
             }.onFailure { error ->
+                Log.e(STARTUP_LOG_TAG, "ProjectViewModel migrate legacy items error uid=$uid", error)
                 _uiState.update {
                     it.copy(errorMessage = error.message ?: "No se pudieron migrar los items legacy")
                 }
@@ -177,6 +192,10 @@ class ProjectViewModel(
     }
 
     private fun syncUiState() {
+        Log.d(
+            STARTUP_LOG_TAG,
+            "ProjectViewModel syncUiState projects=${latestProjects.size} items=${latestItems.size}"
+        )
         val selectedProjectId = updateProjectSummaries()
 
         _uiState.update { state ->
@@ -235,6 +254,7 @@ class ProjectViewModel(
     }
 
     private fun clearData() {
+        Log.d(STARTUP_LOG_TAG, "ProjectViewModel clearData")
         projectsJob?.cancel()
         itemsJob?.cancel()
         latestProjects = emptyList()
@@ -255,6 +275,7 @@ class ProjectViewModel(
 
         itemsJob?.cancel()
         if (projectIds.isEmpty()) {
+            Log.d(STARTUP_LOG_TAG, "ProjectViewModel no projects; clearing items")
             latestItems = emptyList()
             _uiState.update { state ->
                 state.copy(selectedProjectItems = emptyList(), isLoading = false)
@@ -265,6 +286,7 @@ class ProjectViewModel(
         itemsJob = viewModelScope.launch {
             repository.getProjectItems(uid, projectIds)
                 .catch { error ->
+                    Log.e(STARTUP_LOG_TAG, "ProjectViewModel items flow error uid=$uid projectIds=$projectIds", error)
                     _uiState.update {
                         it.copy(
                             isLoading = false,
@@ -273,6 +295,7 @@ class ProjectViewModel(
                     }
                 }
                 .collect { items ->
+                    Log.d(STARTUP_LOG_TAG, "ProjectViewModel items collected count=${items.size}")
                     latestItems = items
                     val selectedProjectId = updateProjectSummaries()
                     _uiState.update { state ->
@@ -296,6 +319,7 @@ class ProjectViewModel(
                     block()
                 }
             } catch (error: Throwable) {
+                Log.e(STARTUP_LOG_TAG, "ProjectViewModel write error", error)
                 _uiState.update { it.copy(errorMessage = mapErrorMessage(error)) }
             } finally {
                 _uiState.update { it.copy(isSaving = false) }

@@ -3,6 +3,7 @@ package com.todolist.app
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -23,6 +24,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
@@ -59,17 +61,22 @@ import com.todolist.app.data.model.Task
 import com.todolist.app.data.model.TaskPriority
 import com.todolist.app.ui.screens.ProjectScreen
 import com.todolist.app.ui.screens.TaskScreen
+import com.todolist.app.ui.screens.UserListScreen
 import com.todolist.app.ui.theme.TodoListTheme
 import com.todolist.app.viewmodel.ProjectUiState
 import com.todolist.app.viewmodel.ProjectViewModel
 import com.todolist.app.viewmodel.TaskUiState
 import com.todolist.app.viewmodel.TaskViewModel
+import com.todolist.app.viewmodel.UserListUiState
+import com.todolist.app.viewmodel.UserListViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+
+private const val STARTUP_LOG_TAG = "TodoListStartup"
 
 data class AuthUiState(
     val user: FirebaseUser? = null,
@@ -83,6 +90,10 @@ class AuthViewModel : ViewModel() {
     val uiState: StateFlow<AuthUiState> = _uiState.asStateFlow()
 
     private val authStateListener = FirebaseAuth.AuthStateListener { firebaseAuth ->
+        Log.d(
+            STARTUP_LOG_TAG,
+            "AuthViewModel authStateListener user=${firebaseAuth.currentUser?.uid ?: "null"}"
+        )
         _uiState.update {
             it.copy(
                 user = firebaseAuth.currentUser,
@@ -93,6 +104,7 @@ class AuthViewModel : ViewModel() {
     }
 
     init {
+        Log.d(STARTUP_LOG_TAG, "AuthViewModel init currentUser=${auth.currentUser?.uid ?: "null"}")
         auth.addAuthStateListener(authStateListener)
     }
 
@@ -102,14 +114,17 @@ class AuthViewModel : ViewModel() {
     }
 
     fun onSignInStarted() {
+        Log.d(STARTUP_LOG_TAG, "AuthViewModel sign-in started")
         _uiState.update { it.copy(isLoading = true, errorMessage = null) }
     }
 
     fun onSignInFailed(message: String) {
+        Log.e(STARTUP_LOG_TAG, "AuthViewModel sign-in failed: $message")
         _uiState.update { it.copy(isLoading = false, errorMessage = message) }
     }
 
     fun onSignedOut() {
+        Log.d(STARTUP_LOG_TAG, "AuthViewModel sign-out requested")
         auth.signOut()
         _uiState.update { it.copy(isLoading = false, errorMessage = null) }
     }
@@ -125,6 +140,7 @@ class MainActivity : ComponentActivity() {
     private val authViewModel: AuthViewModel by viewModels()
     private val taskViewModel: TaskViewModel by viewModels()
     private val projectViewModel: ProjectViewModel by viewModels()
+    private val userListViewModel: UserListViewModel by viewModels()
     private val openCreateRequest = mutableStateOf(0)
     private val openTaskRequest = mutableStateOf(0)
     private val openTaskId = mutableStateOf<String?>(null)
@@ -133,33 +149,46 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Log.d(
+            STARTUP_LOG_TAG,
+            "MainActivity onCreate savedInstanceState=${savedInstanceState != null} currentUser=${FirebaseAuth.getInstance().currentUser?.uid ?: "null"}"
+        )
         handleLaunchIntent(intent)
         enableEdgeToEdge()
         setContent {
+            Log.d(STARTUP_LOG_TAG, "MainActivity setContent composing")
             TodoListTheme {
-                AuthGate(
-                    viewModel = authViewModel,
-                    taskViewModel = taskViewModel,
-                    projectViewModel = projectViewModel,
-                    openCreateRequest = openCreateRequest.value,
-                    openTaskRequest = openTaskRequest.value,
-                    openTaskId = openTaskId.value,
-                    openProjectRequest = openProjectRequest.value,
-                    openProjectId = openProjectId.value,
-                    modifier = Modifier.fillMaxSize()
-                )
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
+                    AuthGate(
+                        viewModel = authViewModel,
+                        taskViewModel = taskViewModel,
+                        projectViewModel = projectViewModel,
+                        userListViewModel = userListViewModel,
+                        openCreateRequest = openCreateRequest.value,
+                        openTaskRequest = openTaskRequest.value,
+                        openTaskId = openTaskId.value,
+                        openProjectRequest = openProjectRequest.value,
+                        openProjectId = openProjectId.value,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
             }
         }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        Log.d(STARTUP_LOG_TAG, "MainActivity onNewIntent")
         setIntent(intent)
         handleLaunchIntent(intent)
     }
 
     private fun handleLaunchIntent(intent: Intent?) {
         if (intent?.getBooleanExtra(EXTRA_OPEN_CREATE_TASK, false) == true) {
+            Log.d(STARTUP_LOG_TAG, "Launch intent requests create task")
             openCreateRequest.value += 1
         }
 
@@ -167,6 +196,7 @@ class MainActivity : ComponentActivity() {
             ?.trim()
             ?.takeIf { it.isNotEmpty() }
             ?.let { taskId ->
+                Log.d(STARTUP_LOG_TAG, "Launch intent requests task id=$taskId")
                 openTaskId.value = taskId
                 openTaskRequest.value += 1
             }
@@ -175,6 +205,7 @@ class MainActivity : ComponentActivity() {
             ?.trim()
             ?.takeIf { it.isNotEmpty() }
             ?.let { projectId ->
+                Log.d(STARTUP_LOG_TAG, "Launch intent requests project id=$projectId")
                 openProjectId.value = projectId
                 openProjectRequest.value += 1
             }
@@ -186,6 +217,7 @@ private fun AuthGate(
     viewModel: AuthViewModel,
     taskViewModel: TaskViewModel,
     projectViewModel: ProjectViewModel,
+    userListViewModel: UserListViewModel,
     openCreateRequest: Int,
     openTaskRequest: Int,
     openTaskId: String?,
@@ -200,8 +232,54 @@ private fun AuthGate(
     val uiState by viewModel.uiState.collectAsState()
     val taskUiState by taskViewModel.uiState.collectAsState()
     val projectUiState by projectViewModel.uiState.collectAsState()
+    val userListUiState by userListViewModel.uiState.collectAsState()
+
+    LaunchedEffect(uiState.user, uiState.isLoading, uiState.errorMessage) {
+        Log.d(
+            STARTUP_LOG_TAG,
+            "AuthGate state user=${uiState.user?.uid ?: "null"} loading=${uiState.isLoading} error=${uiState.errorMessage ?: "null"}"
+        )
+    }
+
+    LaunchedEffect(
+        taskUiState.isLoading,
+        taskUiState.openTasks.size,
+        taskUiState.doneTasks.size,
+        taskUiState.archivedTasks.size,
+        taskUiState.errorMessage
+    ) {
+        Log.d(
+            STARTUP_LOG_TAG,
+            "TaskUiState loading=${taskUiState.isLoading} open=${taskUiState.openTasks.size} done=${taskUiState.doneTasks.size} archived=${taskUiState.archivedTasks.size} error=${taskUiState.errorMessage ?: "null"}"
+        )
+    }
+
+    LaunchedEffect(
+        projectUiState.isLoading,
+        projectUiState.projectSummaries.size,
+        projectUiState.selectedProjectId,
+        projectUiState.errorMessage
+    ) {
+        Log.d(
+            STARTUP_LOG_TAG,
+            "ProjectUiState loading=${projectUiState.isLoading} projects=${projectUiState.projectSummaries.size} selected=${projectUiState.selectedProjectId ?: "null"} error=${projectUiState.errorMessage ?: "null"}"
+        )
+    }
+
+    LaunchedEffect(
+        userListUiState.isLoading,
+        userListUiState.listSummaries.size,
+        userListUiState.selectedListId,
+        userListUiState.errorMessage
+    ) {
+        Log.d(
+            STARTUP_LOG_TAG,
+            "UserListUiState loading=${userListUiState.isLoading} lists=${userListUiState.listSummaries.size} selected=${userListUiState.selectedListId ?: "null"} error=${userListUiState.errorMessage ?: "null"}"
+        )
+    }
 
     if (uiState.user == null) {
+        Log.d(STARTUP_LOG_TAG, "AuthGate rendering LoginScreen")
         LoginScreen(
             isLoading = uiState.isLoading,
             errorMessage = uiState.errorMessage,
@@ -224,9 +302,11 @@ private fun AuthGate(
             }
         )
     } else {
+        Log.d(STARTUP_LOG_TAG, "AuthGate rendering HomeScreen")
         HomeScreen(
             taskUiState = taskUiState,
             projectUiState = projectUiState,
+            userListUiState = userListUiState,
             modifier = modifier,
             onAddTask = taskViewModel::addTask,
             onCreateTag = taskViewModel::createTag,
@@ -246,6 +326,14 @@ private fun AuthGate(
             onEditProjectItem = projectViewModel::editProjectItem,
             onDeleteProjectItem = projectViewModel::deleteProjectItem,
             onToggleProjectItemDone = projectViewModel::toggleProjectItemDone,
+            onSelectList = userListViewModel::selectList,
+            onCreateList = userListViewModel::createList,
+            onRenameList = userListViewModel::renameList,
+            onDeleteList = userListViewModel::deleteList,
+            onCreateListItem = userListViewModel::createListItem,
+            onEditListItem = userListViewModel::editListItem,
+            onDeleteListItem = userListViewModel::deleteListItem,
+            onToggleListItemChecked = userListViewModel::toggleListItemChecked,
             openCreateRequest = openCreateRequest,
             openTaskRequest = openTaskRequest,
             openTaskId = openTaskId,
@@ -295,6 +383,7 @@ private fun LoginScreen(
 private fun HomeScreen(
     taskUiState: TaskUiState,
     projectUiState: ProjectUiState,
+    userListUiState: UserListUiState,
     onAddTask: (
         String,
         TaskPriority,
@@ -319,6 +408,14 @@ private fun HomeScreen(
     onEditProjectItem: (com.todolist.app.data.model.ProjectItem, String, String, com.todolist.app.data.model.ProjectItemType) -> Unit,
     onDeleteProjectItem: (com.todolist.app.data.model.ProjectItem) -> Unit,
     onToggleProjectItemDone: (com.todolist.app.data.model.ProjectItem) -> Unit,
+    onSelectList: (String?) -> Unit,
+    onCreateList: (String) -> Unit,
+    onRenameList: (com.todolist.app.data.model.UserList, String) -> Unit,
+    onDeleteList: (com.todolist.app.data.model.UserList) -> Unit,
+    onCreateListItem: (String, String) -> Unit,
+    onEditListItem: (com.todolist.app.data.model.UserListItem, String) -> Unit,
+    onDeleteListItem: (com.todolist.app.data.model.UserListItem) -> Unit,
+    onToggleListItemChecked: (com.todolist.app.data.model.UserListItem) -> Unit,
     openCreateRequest: Int,
     openTaskRequest: Int,
     openTaskId: String?,
@@ -330,6 +427,10 @@ private fun HomeScreen(
     var menuExpanded by remember { mutableStateOf(false) }
     var openFilterRequest by remember { mutableStateOf(0) }
     var selectedSection by remember { mutableStateOf(HomeSection.TASKS) }
+
+    LaunchedEffect(selectedSection) {
+        Log.d(STARTUP_LOG_TAG, "HomeScreen selectedSection=${selectedSection.title}")
+    }
 
     LaunchedEffect(openCreateRequest, openTaskRequest, openTaskId) {
         val shouldOpenTasks = openCreateRequest > 0 || (
@@ -359,7 +460,7 @@ private fun HomeScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = if (selectedSection == HomeSection.TASKS) "Tareas" else "Proyectos",
+                text = selectedSection.title,
                 style = MaterialTheme.typography.headlineMedium
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -377,6 +478,13 @@ private fun HomeScreen(
                         onDismissRequest = { menuExpanded = false }
                     ) {
                         DropdownMenuItem(
+                            text = { Text("Listas") },
+                            onClick = {
+                                menuExpanded = false
+                                selectedSection = HomeSection.LISTS
+                            }
+                        )
+                        DropdownMenuItem(
                             text = { Text("Salir") },
                             onClick = {
                                 menuExpanded = false
@@ -388,7 +496,7 @@ private fun HomeScreen(
             }
         }
         Spacer(modifier = Modifier.height(12.dp))
-        TabRow(selectedTabIndex = if (selectedSection == HomeSection.TASKS) 0 else 1) {
+        TabRow(selectedTabIndex = selectedSection.ordinal) {
             Tab(
                 selected = selectedSection == HomeSection.TASKS,
                 onClick = { selectedSection = HomeSection.TASKS },
@@ -399,58 +507,94 @@ private fun HomeScreen(
                 onClick = { selectedSection = HomeSection.PROJECTS },
                 text = { Text("Proyectos") }
             )
+            Tab(
+                selected = selectedSection == HomeSection.LISTS,
+                onClick = { selectedSection = HomeSection.LISTS },
+                text = { Text("Listas") }
+            )
         }
         Spacer(modifier = Modifier.height(12.dp))
-        if (selectedSection == HomeSection.TASKS) {
-            TaskScreen(
-                tags = taskUiState.tags,
-                openTasks = taskUiState.openTasks,
-                doneTasks = taskUiState.doneTasks,
-                archivedTasks = taskUiState.archivedTasks,
-                isLoading = taskUiState.isLoading,
-                errorMessage = taskUiState.errorMessage,
-                onAddTask = onAddTask,
-                onCreateTag = onCreateTag,
-                onRenameTag = onRenameTag,
-                onDeleteTag = onDeleteTag,
-                isCreating = taskUiState.isCreating,
-                createError = taskUiState.createError,
-                onClearCreateError = onClearCreateError,
-                onToggleCompleted = onToggleCompleted,
-                onChangePriority = onChangePriority,
-                onToggleArchived = onToggleArchived,
-                onDeleteTask = onDeleteTask,
-                onSaveTask = onSaveTask,
-                hasSession = taskUiState.user != null,
-                openFilterRequest = openFilterRequest,
-                openCreateRequest = openCreateRequest,
-                openTaskRequest = openTaskRequest,
-                openTaskId = openTaskId,
-                modifier = Modifier.weight(1f)
-            )
-        } else {
-            ProjectScreen(
-                projectSummaries = projectUiState.projectSummaries,
-                selectedProjectSummary = projectUiState.selectedProjectSummary,
-                selectedProjectItems = projectUiState.selectedProjectItems,
-                isLoading = projectUiState.isLoading,
-                isSaving = projectUiState.isSaving,
-                errorMessage = projectUiState.errorMessage,
-                onSelectProject = onSelectProject,
-                onCreateProject = onCreateProject,
-                onRenameProject = onRenameProject,
-                onDeleteProject = onDeleteProject,
-                onCreateProjectItem = onCreateProjectItem,
-                onEditProjectItem = onEditProjectItem,
-                onDeleteProjectItem = onDeleteProjectItem,
-                onToggleProjectItemDone = onToggleProjectItemDone,
-                modifier = Modifier.weight(1f)
-            )
+        when (selectedSection) {
+            HomeSection.TASKS -> {
+                Log.d(STARTUP_LOG_TAG, "HomeScreen rendering TaskScreen")
+                TaskScreen(
+                    tags = taskUiState.tags,
+                    openTasks = taskUiState.openTasks,
+                    doneTasks = taskUiState.doneTasks,
+                    archivedTasks = taskUiState.archivedTasks,
+                    isLoading = taskUiState.isLoading,
+                    errorMessage = taskUiState.errorMessage,
+                    onAddTask = onAddTask,
+                    onCreateTag = onCreateTag,
+                    onRenameTag = onRenameTag,
+                    onDeleteTag = onDeleteTag,
+                    isCreating = taskUiState.isCreating,
+                    createError = taskUiState.createError,
+                    onClearCreateError = onClearCreateError,
+                    onToggleCompleted = onToggleCompleted,
+                    onChangePriority = onChangePriority,
+                    onToggleArchived = onToggleArchived,
+                    onDeleteTask = onDeleteTask,
+                    onSaveTask = onSaveTask,
+                    hasSession = taskUiState.user != null,
+                    openFilterRequest = openFilterRequest,
+                    openCreateRequest = openCreateRequest,
+                    openTaskRequest = openTaskRequest,
+                    openTaskId = openTaskId,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            HomeSection.PROJECTS -> {
+                Log.d(STARTUP_LOG_TAG, "HomeScreen rendering ProjectScreen")
+                ProjectScreen(
+                    projectSummaries = projectUiState.projectSummaries,
+                    selectedProjectSummary = projectUiState.selectedProjectSummary,
+                    selectedProjectItems = projectUiState.selectedProjectItems,
+                    isLoading = projectUiState.isLoading,
+                    isSaving = projectUiState.isSaving,
+                    errorMessage = projectUiState.errorMessage,
+                    onSelectProject = onSelectProject,
+                    onCreateProject = onCreateProject,
+                    onRenameProject = onRenameProject,
+                    onDeleteProject = onDeleteProject,
+                    onCreateProjectItem = onCreateProjectItem,
+                    onEditProjectItem = onEditProjectItem,
+                    onDeleteProjectItem = onDeleteProjectItem,
+                    onToggleProjectItemDone = onToggleProjectItemDone,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            HomeSection.LISTS -> {
+                Log.d(STARTUP_LOG_TAG, "HomeScreen rendering UserListScreen")
+                UserListScreen(
+                    listSummaries = userListUiState.listSummaries,
+                    selectedListSummary = userListUiState.selectedListSummary,
+                    selectedListItems = userListUiState.selectedListItems,
+                    isLoading = userListUiState.isLoading,
+                    isSaving = userListUiState.isSaving,
+                    errorMessage = userListUiState.errorMessage,
+                    onSelectList = onSelectList,
+                    onCreateList = onCreateList,
+                    onRenameList = onRenameList,
+                    onDeleteList = onDeleteList,
+                    onCreateListItem = onCreateListItem,
+                    onEditListItem = onEditListItem,
+                    onDeleteListItem = onDeleteListItem,
+                    onToggleListItemChecked = onToggleListItemChecked,
+                    modifier = Modifier.weight(1f)
+                )
+            }
         }
     }
 }
 
-private enum class HomeSection { TASKS, PROJECTS }
+private enum class HomeSection(val title: String) {
+    TASKS("Tareas"),
+    PROJECTS("Proyectos"),
+    LISTS("Listas")
+}
 
 private suspend fun signInWithGoogle(
     auth: FirebaseAuth,

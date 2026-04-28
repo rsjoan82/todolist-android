@@ -45,6 +45,7 @@ class TaskViewModel(
 ) : ViewModel() {
     companion object {
         private const val LOG_TAG = "TodoListCreate"
+        private const val STARTUP_LOG_TAG = "TodoListStartup"
     }
 
     private val _uiState = MutableStateFlow(TaskUiState(user = auth.currentUser))
@@ -57,6 +58,7 @@ class TaskViewModel(
 
     private val authStateListener = FirebaseAuth.AuthStateListener { firebaseAuth ->
         val user = firebaseAuth.currentUser
+        Log.d(STARTUP_LOG_TAG, "TaskViewModel authStateListener user=${user?.uid ?: "null"}")
         _uiState.update { state ->
             state.copy(user = user, errorMessage = null)
         }
@@ -70,8 +72,10 @@ class TaskViewModel(
     }
 
     init {
+        Log.d(STARTUP_LOG_TAG, "TaskViewModel init currentUser=${auth.currentUser?.uid ?: "null"}")
         auth.addAuthStateListener(authStateListener)
         auth.currentUser?.uid?.let {
+            Log.d(STARTUP_LOG_TAG, "TaskViewModel init observing uid=$it")
             observeTags(it)
             observeTasks(it)
         }
@@ -187,6 +191,7 @@ class TaskViewModel(
                     tagRepository.createTag(uid, cleanName)
                 }
             }.onFailure { error ->
+                Log.e(STARTUP_LOG_TAG, "TaskViewModel createTag error uid=$uid", error)
                 _uiState.update {
                     it.copy(errorMessage = mapCreateErrorMessage(error))
                 }
@@ -233,6 +238,7 @@ class TaskViewModel(
                     tagRepository.renameTag(uid, tag.id, cleanName)
                 }
             }.onFailure { error ->
+                Log.e(STARTUP_LOG_TAG, "TaskViewModel renameTag error uid=$uid tagId=${tag.id}", error)
                 _uiState.update {
                     it.copy(errorMessage = mapCreateErrorMessage(error))
                 }
@@ -263,6 +269,7 @@ class TaskViewModel(
                     tagRepository.deleteTag(uid, tag.id)
                 }
             }.onFailure { error ->
+                Log.e(STARTUP_LOG_TAG, "TaskViewModel deleteTag error uid=$uid tagId=${tag.id}", error)
                 _uiState.update {
                     it.copy(errorMessage = mapCreateErrorMessage(error))
                 }
@@ -355,6 +362,7 @@ class TaskViewModel(
             runCatching {
                 repository.deleteTask(uid, task.id)
             }.onFailure { error ->
+                Log.e(STARTUP_LOG_TAG, "TaskViewModel deleteTask error uid=$uid taskId=${task.id}", error)
                 _uiState.update {
                     it.copy(errorMessage = error.message ?: "No se pudo borrar la tarea")
                 }
@@ -370,6 +378,7 @@ class TaskViewModel(
             runCatching {
                 repository.updateTask(uid, taskId, patch)
             }.onFailure { error ->
+                Log.e(STARTUP_LOG_TAG, "TaskViewModel updateTask error uid=$uid taskId=$taskId", error)
                 _uiState.update {
                     it.copy(errorMessage = error.message ?: "No se pudo actualizar la tarea")
                 }
@@ -384,6 +393,7 @@ class TaskViewModel(
     }
 
     private fun clearTasks() {
+        Log.d(STARTUP_LOG_TAG, "TaskViewModel clearTasks")
         tagsJob?.cancel()
         openTasksJob?.cancel()
         doneTasksJob?.cancel()
@@ -400,22 +410,26 @@ class TaskViewModel(
     }
 
     private fun observeTags(uid: String) {
+        Log.d(STARTUP_LOG_TAG, "TaskViewModel observeTags uid=$uid")
         tagsJob?.cancel()
 
         tagsJob = viewModelScope.launch {
             tagRepository.getTags(uid)
                 .catch { error ->
+                    Log.e(STARTUP_LOG_TAG, "TaskViewModel tags flow error uid=$uid", error)
                     _uiState.update {
                         it.copy(errorMessage = error.message ?: "No se pudieron cargar los tags")
                     }
                 }
                 .collect { tags ->
+                    Log.d(STARTUP_LOG_TAG, "TaskViewModel tags collected count=${tags.size}")
                     _uiState.update { it.copy(tags = tags) }
                 }
         }
     }
 
     private fun observeTasks(uid: String) {
+        Log.d(STARTUP_LOG_TAG, "TaskViewModel observeTasks uid=$uid")
         openTasksJob?.cancel()
         doneTasksJob?.cancel()
         archivedTasksJob?.cancel()
@@ -425,6 +439,7 @@ class TaskViewModel(
         openTasksJob = viewModelScope.launch {
             repository.getOpenTasks(uid)
                 .catch { error ->
+                    Log.e(STARTUP_LOG_TAG, "TaskViewModel open tasks flow error uid=$uid", error)
                     _uiState.update {
                         it.copy(
                             isLoading = false,
@@ -433,6 +448,7 @@ class TaskViewModel(
                     }
                 }
                 .collect { tasks ->
+                    Log.d(STARTUP_LOG_TAG, "TaskViewModel open tasks collected count=${tasks.size}")
                     _uiState.update { it.copy(openTasks = tasks, isLoading = false) }
                 }
         }
@@ -440,6 +456,7 @@ class TaskViewModel(
         doneTasksJob = viewModelScope.launch {
             repository.getDoneTasks(uid)
                 .catch { error ->
+                    Log.e(STARTUP_LOG_TAG, "TaskViewModel done tasks flow error uid=$uid", error)
                     _uiState.update {
                         it.copy(
                             isLoading = false,
@@ -448,6 +465,7 @@ class TaskViewModel(
                     }
                 }
                 .collect { tasks ->
+                    Log.d(STARTUP_LOG_TAG, "TaskViewModel done tasks collected count=${tasks.size}")
                     _uiState.update { it.copy(doneTasks = tasks, isLoading = false) }
                 }
         }
@@ -455,6 +473,7 @@ class TaskViewModel(
         archivedTasksJob = viewModelScope.launch {
             repository.getArchivedTasks(uid)
                 .catch { error ->
+                    Log.e(STARTUP_LOG_TAG, "TaskViewModel archived tasks flow error uid=$uid", error)
                     _uiState.update {
                         it.copy(
                             isLoading = false,
@@ -463,6 +482,7 @@ class TaskViewModel(
                     }
                 }
                 .collect { tasks ->
+                    Log.d(STARTUP_LOG_TAG, "TaskViewModel archived tasks collected count=${tasks.size}")
                     _uiState.update { it.copy(archivedTasks = tasks, isLoading = false) }
                 }
         }
