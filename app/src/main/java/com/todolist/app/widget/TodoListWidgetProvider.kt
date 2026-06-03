@@ -15,6 +15,7 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.todolist.app.MainActivity
 import com.todolist.app.R
 import com.todolist.app.WidgetCreateTaskActivity
+import com.todolist.app.data.AuthSessionStore
 import com.todolist.app.data.repository.TaskRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -74,7 +75,7 @@ class TodoListWidgetProvider : AppWidgetProvider() {
                 }
             }
             ACTION_ITEM_CLICK -> {
-                val uid = FirebaseAuth.getInstance().currentUser?.uid.orEmpty()
+                val uid = resolveUid(context).orEmpty()
                 val appWidgetId = intent.getIntExtra(
                     AppWidgetManager.EXTRA_APPWIDGET_ID,
                     AppWidgetManager.INVALID_APPWIDGET_ID
@@ -149,7 +150,7 @@ class TodoListWidgetProvider : AppWidgetProvider() {
                 }
             }
             ACTION_CLEAR_DONE -> {
-                val uid = FirebaseAuth.getInstance().currentUser?.uid.orEmpty()
+                val uid = resolveUid(context).orEmpty()
                 if (uid.isBlank()) return
 
                 val pendingResult = goAsync()
@@ -167,12 +168,12 @@ class TodoListWidgetProvider : AppWidgetProvider() {
     }
 
     private suspend fun updateAppWidget(context: Context, manager: AppWidgetManager, appWidgetId: Int) {
-        val user = FirebaseAuth.getInstance().currentUser
+        val uid = resolveUid(context)
         val views = RemoteViews(context.packageName, R.layout.widget_todolist)
         views.setTextViewText(R.id.widgetTitle, "TodoList")
         views.setTextViewText(
             R.id.widgetEmpty,
-            if (user == null) "Abre la app para iniciar sesion" else "No hay tareas"
+            if (uid == null) "Abre la app para iniciar sesion" else "No hay tareas"
         )
         views.setEmptyView(R.id.widgetTaskList, R.id.widgetEmpty)
 
@@ -243,5 +244,10 @@ class TodoListWidgetProvider : AppWidgetProvider() {
                 updateAppWidget(context, manager, appWidgetId)
             }
         }
+    }
+
+    private fun resolveUid(context: Context): String? {
+        return FirebaseAuth.getInstance().currentUser?.uid
+            ?: AuthSessionStore.getLastUid(context)
     }
 }

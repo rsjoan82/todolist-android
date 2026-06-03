@@ -57,6 +57,7 @@ import com.google.firebase.Timestamp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
+import com.todolist.app.data.AuthSessionStore
 import com.todolist.app.data.model.Task
 import com.todolist.app.data.model.TaskPriority
 import com.todolist.app.ui.screens.ProjectScreen
@@ -235,6 +236,9 @@ private fun AuthGate(
     val userListUiState by userListViewModel.uiState.collectAsState()
 
     LaunchedEffect(uiState.user, uiState.isLoading, uiState.errorMessage) {
+        uiState.user?.uid?.let { uid ->
+            AuthSessionStore.saveLastUid(context, uid)
+        }
         Log.d(
             STARTUP_LOG_TAG,
             "AuthGate state user=${uiState.user?.uid ?: "null"} loading=${uiState.isLoading} error=${uiState.errorMessage ?: "null"}"
@@ -340,6 +344,7 @@ private fun AuthGate(
             openProjectRequest = openProjectRequest,
             openProjectId = openProjectId,
             onLogout = {
+                AuthSessionStore.saveLastUid(context, null)
                 viewModel.onSignedOut()
                 scope.launch {
                     runCatching {

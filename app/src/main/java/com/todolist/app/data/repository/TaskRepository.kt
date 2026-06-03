@@ -9,6 +9,8 @@ import com.todolist.app.data.model.Task
 import com.todolist.app.data.model.TaskPatch
 import com.todolist.app.data.model.TaskPriority
 import com.todolist.app.data.model.TaskStatus
+import java.time.LocalDate
+import java.time.ZoneId
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -331,6 +333,8 @@ class TaskRepository(
         val rawTag = get("tag")
         val rawTags = get("tags")
         val rawTagIds = get("tagIds")
+        val rawDueDate = get("dueDate")
+        val rawCreatedAt = get("createdAt")
         val parsedTagId = parseTagRaw(rawTagId, rawTag, rawTagIds, rawTags)
 
         val mappedTask = Task(
@@ -340,10 +344,10 @@ class TaskRepository(
             status = parseStatusRaw(get("status")),
             archived = parseBooleanRaw(get("archived")),
             priority = parsePriorityRaw(get("priority")),
-            dueDate = parseTimestampRaw(get("dueDate")),
+            dueDate = parseTimestampRaw(rawDueDate),
             tagId = parsedTagId,
             doneAt = parseTimestampRaw(get("doneAt")),
-            createdAt = parseTimestampRaw(get("createdAt"))
+            createdAt = parseTimestampRaw(rawCreatedAt)
         )
 
         val rawTagIdType = rawTagId?.javaClass?.name ?: "null"
@@ -353,6 +357,10 @@ class TaskRepository(
         Log.d(
             "TodoListTags",
             "map task id=${mappedTask.id} title=${mappedTask.title} tagId=${mappedTask.tagId} rawTagIdType=$rawTagIdType rawTagType=$rawType legacyTagsType=$legacyType legacyTagIdsType=$legacyTagIdsType"
+        )
+        Log.d(
+            "TodoListWidget",
+            "map task id=${mappedTask.id} title=${mappedTask.title} rawDueDateType=${rawDueDate?.javaClass?.name ?: "null"} rawDueDate=$rawDueDate parsedDueDate=${mappedTask.dueDate} rawCreatedAtType=${rawCreatedAt?.javaClass?.name ?: "null"} rawCreatedAt=$rawCreatedAt parsedCreatedAt=${mappedTask.createdAt} completed=${mappedTask.completed} status=${mappedTask.status.value} archived=${mappedTask.archived}"
         )
 
         return mappedTask
@@ -478,7 +486,16 @@ class TaskRepository(
     }
 
     private fun parseTimestampRaw(rawValue: Any?): Timestamp? {
-        return rawValue as? Timestamp
+        return when (rawValue) {
+            is Timestamp -> rawValue
+            is String -> runCatching {
+                val instant = LocalDate.parse(rawValue.trim())
+                    .atStartOfDay(ZoneId.systemDefault())
+                    .toInstant()
+                Timestamp(instant.epochSecond, 0)
+            }.getOrNull()
+            else -> null
+        }
     }
 
     private fun normalizeTagId(value: String): String {

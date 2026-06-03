@@ -1342,6 +1342,7 @@ private fun TaskRow(
     var menuExpanded by remember { mutableStateOf(false) }
     val priorityColor = task.priority.toIndicatorColor()
     val indicatorColor = if (task.completed) priorityColor.copy(alpha = 0.35f) else priorityColor
+    val dueDateText = task.dueDate?.let { formatDueDate(it) }
 
     Row(
         modifier = Modifier
@@ -1368,6 +1369,16 @@ private fun TaskRow(
             color = if (task.completed) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
             textDecoration = if (task.completed) TextDecoration.LineThrough else TextDecoration.None
         )
+
+        if (dueDateText != null) {
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = dueDateText,
+                fontSize = 12.sp,
+                maxLines = 1,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
 
         Box(
             modifier = Modifier
@@ -1477,7 +1488,11 @@ private fun DueDateSelector(
     ) {
         Button(
             onClick = {
-                val today = LocalDate.now()
+                val initialDate = selectedDueDate?.let {
+                    Instant.ofEpochSecond(it.seconds)
+                        .atZone(ZoneId.systemDefault())
+                        .toLocalDate()
+                } ?: LocalDate.now()
                 DatePickerDialog(
                     context,
                     { _, year, month, dayOfMonth ->
@@ -1485,9 +1500,9 @@ private fun DueDateSelector(
                         val instant = localDate.atStartOfDay(ZoneId.systemDefault()).toInstant()
                         onDueDateSelected(Timestamp(instant.epochSecond, 0))
                     },
-                    today.year,
-                    today.monthValue - 1,
-                    today.dayOfMonth
+                    initialDate.year,
+                    initialDate.monthValue - 1,
+                    initialDate.dayOfMonth
                 ).show()
             },
             enabled = enabled,
