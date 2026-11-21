@@ -358,10 +358,6 @@ class TaskRepository(
             "TodoListTags",
             "map task id=${mappedTask.id} title=${mappedTask.title} tagId=${mappedTask.tagId} rawTagIdType=$rawTagIdType rawTagType=$rawType legacyTagsType=$legacyType legacyTagIdsType=$legacyTagIdsType"
         )
-        Log.d(
-            "TodoListWidget",
-            "map task id=${mappedTask.id} title=${mappedTask.title} rawDueDateType=${rawDueDate?.javaClass?.name ?: "null"} rawDueDate=$rawDueDate parsedDueDate=${mappedTask.dueDate} rawCreatedAtType=${rawCreatedAt?.javaClass?.name ?: "null"} rawCreatedAt=$rawCreatedAt parsedCreatedAt=${mappedTask.createdAt} completed=${mappedTask.completed} status=${mappedTask.status.value} archived=${mappedTask.archived}"
-        )
 
         return mappedTask
     }

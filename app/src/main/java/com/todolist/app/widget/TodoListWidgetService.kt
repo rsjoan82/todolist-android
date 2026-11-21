@@ -2,6 +2,10 @@ package com.todolist.app.widget
 
 import android.appwidget.AppWidgetManager
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
 import android.graphics.Typeface
 import android.text.SpannableString
 import android.text.Spanned
@@ -41,7 +45,9 @@ private class TodoListWidgetFactory(
     private val appWidgetId: Int
 ) : RemoteViewsService.RemoteViewsFactory {
     companion object {
-        private const val LOG_TAG = "TodoListWidget"
+        private const val TAG = "TodoListWidget"
+        private const val PROGRESS_BITMAP_WIDTH = 420
+        private const val PROGRESS_BITMAP_HEIGHT = 32
     }
 
     private sealed interface WidgetEntry {
@@ -56,10 +62,6 @@ private class TodoListWidgetFactory(
             val taskId: String,
             val title: String,
             val isDone: Boolean,
-            val dueDate: com.google.firebase.Timestamp?,
-            val createdAt: com.google.firebase.Timestamp?,
-            val completed: Boolean,
-            val status: TaskStatus,
             val deadlineProgress: Int?,
             override val id: Long
         ) : WidgetEntry
@@ -85,10 +87,6 @@ private class TodoListWidgetFactory(
                 ?: return@runBlocking emptyList()
             val tasks = repository.getAllActiveTasksForWidget(uid)
             val tags = runCatching { tagRepository.getTagsOnce(uid) }.getOrDefault(emptyList())
-            Log.d(
-                LOG_TAG,
-                "onDataSetChanged appWidgetId=$appWidgetId uid=$uid tasks=${tasks.size} tags=${tags.size}"
-            )
             buildEntries(tasks, tags)
         }
     }
@@ -112,10 +110,6 @@ private class TodoListWidgetFactory(
                 views.setTextColor(R.id.widgetItemTitle, context.getColor(android.R.color.darker_gray))
             }
             is WidgetEntry.TaskItem -> {
-                Log.d(
-                    LOG_TAG,
-                    "getViewAt taskId=${entry.taskId} title=${entry.title} dueDate=${entry.dueDate?.toDebugString() ?: "null"} createdAt=${entry.createdAt?.toDebugString() ?: "null"} completed=${entry.completed} status=${entry.status.value} calculatedProgress=${entry.deadlineProgress?.toString() ?: "null"} selectedProgressColor=${entry.deadlineProgress?.toDeadlineProgressColor()?.name ?: "none"}"
-                )
                 views.setViewVisibility(R.id.widgetItemAction, View.VISIBLE)
                 views.setImageViewResource(
                     R.id.widgetItemAction,
@@ -214,36 +208,22 @@ private class TodoListWidgetFactory(
 
         openTasks.forEach { task ->
             val progress = calculateDeadlineProgress(task, isDone = false)
-            Log.d(
-                LOG_TAG,
-                "buildTaskEntry taskId=${task.id} title=${task.title} dueDate=${task.dueDate?.toDebugString() ?: "null"} createdAt=${task.createdAt?.toDebugString() ?: "null"} completed=${task.completed} status=${task.status.value} calculatedProgress=${progress?.toString() ?: "null"} selectedProgressColor=${progress?.toDeadlineProgressColor()?.name ?: "none"}"
-            )
+            logTaskProgress(task, isDone = false, progress = progress)
             entries += WidgetEntry.TaskItem(
                 taskId = task.id,
                 title = task.title,
                 isDone = false,
-                dueDate = task.dueDate,
-                createdAt = task.createdAt,
-                completed = task.completed,
-                status = task.status,
                 deadlineProgress = progress,
                 id = task.id.hashCode().toLong()
             )
         }
         doneTasks.forEach { task ->
             val progress = calculateDeadlineProgress(task, isDone = true)
-            Log.d(
-                LOG_TAG,
-                "buildTaskEntry taskId=${task.id} title=${task.title} dueDate=${task.dueDate?.toDebugString() ?: "null"} createdAt=${task.createdAt?.toDebugString() ?: "null"} completed=${task.completed} status=${task.status.value} calculatedProgress=${progress?.toString() ?: "null"} selectedProgressColor=${progress?.toDeadlineProgressColor()?.name ?: "none"}"
-            )
+            logTaskProgress(task, isDone = true, progress = progress)
             entries += WidgetEntry.TaskItem(
                 taskId = task.id,
                 title = task.title,
                 isDone = true,
-                dueDate = task.dueDate,
-                createdAt = task.createdAt,
-                completed = task.completed,
-                status = task.status,
                 deadlineProgress = progress,
                 id = task.id.hashCode().toLong()
             )
@@ -252,33 +232,24 @@ private class TodoListWidgetFactory(
 
     private fun bindDeadlineProgress(views: RemoteViews, progress: Int?) {
         hideDeadlineProgress(views)
-        if (progress == null) return
-
-        val progressViewId = when (progress.toDeadlineProgressColor()) {
-            DeadlineProgressColor.GREEN -> R.id.widgetDeadlineProgressGreen
-            DeadlineProgressColor.YELLOW -> R.id.widgetDeadlineProgressYellow
-            DeadlineProgressColor.ORANGE -> R.id.widgetDeadlineProgressOrange
-            DeadlineProgressColor.RED -> R.id.widgetDeadlineProgressRed
+        if (progress == null) {
+            Log.d(TAG, "bindDeadlineProgress hidden: no dueDate")
+            return
         }
 
         Log.d(
-            LOG_TAG,
-            "bindDeadlineProgress progress=$progress color=${progress.toDeadlineProgressColor().name} viewId=$progressViewId"
+            TAG,
+            "bindDeadlineProgress visible progress=$progress color=${progress.toDeadlineProgressColor()}"
         )
-        views.setViewVisibility(progressViewId, View.VISIBLE)
-        views.setProgressBar(progressViewId, 100, progress, false)
+        views.setViewVisibility(R.id.widgetDeadlineProgressBackground, View.VISIBLE)
+        views.setImageViewBitmap(
+            R.id.widgetDeadlineProgressBackground,
+            createDeadlineProgressBitmap(progress)
+        )
     }
 
     private fun hideDeadlineProgress(views: RemoteViews) {
-        listOf(
-            R.id.widgetDeadlineProgressGreen,
-            R.id.widgetDeadlineProgressYellow,
-            R.id.widgetDeadlineProgressOrange,
-            R.id.widgetDeadlineProgressRed
-        ).forEach { progressViewId ->
-            views.setViewVisibility(progressViewId, View.GONE)
-            views.setProgressBar(progressViewId, 100, 0, false)
-        }
+        views.setViewVisibility(R.id.widgetDeadlineProgressBackground, View.GONE)
     }
 
     private fun Int.toDeadlineProgressColor(): DeadlineProgressColor {
@@ -288,6 +259,64 @@ private class TodoListWidgetFactory(
             this >= 50 -> DeadlineProgressColor.YELLOW
             else -> DeadlineProgressColor.GREEN
         }
+    }
+
+    private fun DeadlineProgressColor.trackColor(): Int {
+        return when (this) {
+            DeadlineProgressColor.GREEN -> Color.argb(115, 205, 239, 214)
+            DeadlineProgressColor.YELLOW -> Color.argb(125, 255, 243, 191)
+            DeadlineProgressColor.ORANGE -> Color.argb(130, 255, 216, 168)
+            DeadlineProgressColor.RED -> Color.argb(135, 248, 199, 199)
+        }
+    }
+
+    private fun DeadlineProgressColor.fillColor(): Int {
+        return when (this) {
+            DeadlineProgressColor.GREEN -> Color.argb(175, 124, 210, 145)
+            DeadlineProgressColor.YELLOW -> Color.argb(185, 245, 204, 92)
+            DeadlineProgressColor.ORANGE -> Color.argb(190, 238, 143, 65)
+            DeadlineProgressColor.RED -> Color.argb(195, 225, 98, 98)
+        }
+    }
+
+    private fun createDeadlineProgressBitmap(progress: Int): Bitmap {
+        val safeProgress = progress.coerceIn(0, 100)
+        val color = safeProgress.toDeadlineProgressColor()
+        val bitmap = Bitmap.createBitmap(
+            PROGRESS_BITMAP_WIDTH,
+            PROGRESS_BITMAP_HEIGHT,
+            Bitmap.Config.ARGB_8888
+        )
+        val canvas = Canvas(bitmap)
+        val paint = Paint()
+
+        paint.color = color.trackColor()
+        canvas.drawRect(
+            0f,
+            0f,
+            PROGRESS_BITMAP_WIDTH.toFloat(),
+            PROGRESS_BITMAP_HEIGHT.toFloat(),
+            paint
+        )
+
+        if (safeProgress > 0) {
+            paint.color = color.fillColor()
+            val fillWidth = (PROGRESS_BITMAP_WIDTH * safeProgress / 100f).coerceAtLeast(2f)
+            canvas.drawRect(0f, 0f, fillWidth, PROGRESS_BITMAP_HEIGHT.toFloat(), paint)
+        }
+
+        return bitmap
+    }
+
+    private fun logTaskProgress(task: Task, isDone: Boolean, progress: Int?) {
+        val color = progress?.toDeadlineProgressColor()
+        Log.d(
+            TAG,
+            "renderTask taskId=${task.id} title=${task.title} " +
+                "dueDate=${task.dueDate} createdAt=${task.createdAt} " +
+                "completed=${task.completed} status=${task.status} isDone=$isDone " +
+                "calculatedProgress=$progress selectedProgressColor=$color"
+        )
     }
 
     private fun calculateDeadlineProgress(task: Task, isDone: Boolean): Int? {
@@ -312,10 +341,6 @@ private class TodoListWidgetFactory(
         return Instant.ofEpochSecond(seconds)
             .atZone(ZoneId.systemDefault())
             .toLocalDate()
-    }
-
-    private fun com.google.firebase.Timestamp.toDebugString(): String {
-        return "${toLocalDate()}(${seconds}s,$nanoseconds ns)"
     }
 
     private fun bold(text: String): CharSequence {
